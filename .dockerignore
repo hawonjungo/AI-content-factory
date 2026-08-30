@@ -1,0 +1,7 @@
+**/bin/
+**/obj/
+frontend/
+.git/
+.vs/
+.vscode/
+.env
