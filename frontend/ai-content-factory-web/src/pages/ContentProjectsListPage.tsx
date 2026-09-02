@@ -1,118 +1,88 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import "../ui/wizard.css";
 import { contentProjectsApi, type ContentProject } from "../api/client";
+
+/**
+ * Coarse list-level summary. The authoritative status-to-user mapping lives
+ * server-side in WizardStepResolver and is exposed per project through
+ * /overview; this only needs enough to sort a list at a glance, so it buckets
+ * rather than restating that logic.
+ */
+function summarize(status: string): { label: string; className: string } {
+  switch (status) {
+    case "Draft":
+    case "Researching":
+      return { label: "Nháp", className: "" };
+    case "Approved":
+    case "Published":
+      return { label: "Đã xong", className: "wz-badge-ready" };
+    case "Failed":
+      return { label: "Lỗi", className: "wz-badge-failed" };
+    case "AwaitingApproval":
+      return { label: "Chờ duyệt", className: "wz-badge-ready" };
+    default:
+      return { label: "Đang làm", className: "wz-badge-working" };
+  }
+}
 
 function ContentProjectsListPage() {
   const [projects, setProjects] = useState<ContentProject[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const [title, setTitle] = useState("");
-  const [topic, setTopic] = useState("");
-  const [niche, setNiche] = useState("");
-  const [duration, setDuration] = useState(45);
-  const [submitting, setSubmitting] = useState(false);
-
-  const loadProjects = async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const data = await contentProjectsApi.getAll();
-      setProjects(data);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load content projects.");
-    } finally {
-      setLoading(false);
-    }
-  };
-
   useEffect(() => {
-    loadProjects();
+    contentProjectsApi
+      .getAll()
+      .then(setProjects)
+      .catch((err) => setError(err instanceof Error ? err.message : "Không tải được danh sách video."))
+      .finally(() => setLoading(false));
   }, []);
 
-  const handleCreate = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!title.trim()) return;
-
-    setSubmitting(true);
-    setError(null);
-    try {
-      await contentProjectsApi.create({
-        title,
-        topic: topic || undefined,
-        niche: niche || undefined,
-        targetDurationSeconds: duration,
-      });
-      setTitle("");
-      setTopic("");
-      setNiche("");
-      setDuration(45);
-      await loadProjects();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to create content project.");
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
   return (
-    <main style={{ maxWidth: 800, margin: "0 auto", padding: "2rem", fontFamily: "sans-serif" }}>
+    <main className="wz">
       <h1>AI Content Factory</h1>
-      <p style={{ color: "#666" }}>Content projects</p>
+      <p className="wz-sub">Chọn một video để tiếp tục, hoặc bắt đầu một video mới.</p>
 
-      <form onSubmit={handleCreate} style={{ display: "grid", gap: "0.5rem", marginBottom: "2rem" }}>
-        <input
-          placeholder="Title (required)"
-          value={title}
-          onChange={(e) => setTitle(e.target.value)}
-          required
-        />
-        <input placeholder="Topic" value={topic} onChange={(e) => setTopic(e.target.value)} />
-        <input placeholder="Niche" value={niche} onChange={(e) => setNiche(e.target.value)} />
-        <label>
-          Target duration (seconds):{" "}
-          <input
-            type="number"
-            min={1}
-            max={180}
-            value={duration}
-            onChange={(e) => setDuration(Number(e.target.value))}
-            style={{ width: "5rem" }}
-          />
-        </label>
-        <button type="submit" disabled={submitting}>
-          {submitting ? "Creating..." : "Create content project"}
-        </button>
-      </form>
+      <div className="wz-actions" style={{ marginTop: 0, marginBottom: 24 }}>
+        <Link className="wz-btn wz-btn-primary" to="/projects/new">
+          Tạo video mới
+        </Link>
+      </div>
 
-      {error && <p style={{ color: "crimson" }}>{error}</p>}
+      {error && <p className="wz-error">{error}</p>}
+
       {loading ? (
-        <p>Loading...</p>
+        <p>Đang tải...</p>
       ) : projects.length === 0 ? (
-        <p>No content projects yet. Create one above.</p>
+        <p className="wz-hint">Chưa có video nào.</p>
       ) : (
-        <table style={{ width: "100%", borderCollapse: "collapse" }}>
-          <thead>
-            <tr style={{ textAlign: "left", borderBottom: "1px solid #ccc" }}>
-              <th>Title</th>
-              <th>Topic</th>
-              <th>Status</th>
-              <th>Duration</th>
-            </tr>
-          </thead>
-          <tbody>
-            {projects.map((p) => (
-              <tr key={p.id} style={{ borderBottom: "1px solid #eee" }}>
-                <td>
-                  <Link to={`/projects/${p.id}`}>{p.title}</Link>
-                </td>
-                <td>{p.topic ?? "-"}</td>
-                <td>{p.status}</td>
-                <td>{p.targetDurationSeconds}s</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <div style={{ display: "grid", gap: 10 }}>
+          {projects.map((project) => {
+            const summary = summarize(project.status);
+            return (
+              <Link
+                key={project.id}
+                to={`/projects/${project.id}`}
+                className="wz-card"
+                style={{ display: "block", marginBottom: 0, textDecoration: "none" }}
+              >
+                <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+                  <strong style={{ color: "var(--text-h)" }}>{project.title}</strong>
+                  <span className={`wz-badge ${summary.className}`}>{summary.label}</span>
+                  <span className="wz-hint" style={{ marginLeft: "auto" }}>
+                    {project.targetDurationSeconds}s
+                  </span>
+                </div>
+                {project.topic && (
+                  <p className="wz-hint" style={{ marginTop: 6 }}>
+                    {project.topic}
+                  </p>
+                )}
+              </Link>
+            );
+          })}
+        </div>
       )}
     </main>
   );

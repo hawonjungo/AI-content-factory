@@ -29,9 +29,25 @@ services:
       ConnectionStrings__Postgres: "Host=postgres;Port=5432;Database=${POSTGRES_DB:-aicontentfactory};Username=${POSTGRES_USER:-postgres};Password=${POSTGRES_PASSWORD:-postgres}"
       Cors__AllowedOrigins__0: ${FRONTEND_ORIGIN:-http://localhost:5173}
       Llm__Gemini__ApiKey: ${GEMINI_API_KEY:-}
-      Llm__Gemini__Model: ${GEMINI_MODEL:-gemini-3.6-flash}
+      Llm__Gemini__Model: ${GEMINI_MODEL:-gemini-2.5-flash}
+      Budget__MonthlyLimitUsd: ${BUDGET_MONTHLY_LIMIT_USD:-50}
+      Qa__MinimumOverallScoreToProceed: ${QA_MIN_SCORE:-6.0}
+      Publishing__PublicBaseUrl: ${PUBLISHING_PUBLIC_BASE_URL:-}
+      Publishing__FrontendReturnUrl: ${PUBLISHING_FRONTEND_RETURN_URL:-}
+      Publishing__TokenEncryptionKey: ${PUBLISHING_TOKEN_ENCRYPTION_KEY:-}
+      Publishing__TikTok__ClientId: ${TIKTOK_CLIENT_KEY:-}
+      Publishing__TikTok__ClientSecret: ${TIKTOK_CLIENT_SECRET:-}
+      Publishing__YouTube__ClientId: ${YOUTUBE_CLIENT_ID:-}
+      Publishing__YouTube__ClientSecret: ${YOUTUBE_CLIENT_SECRET:-}
+      Publishing__Instagram__ClientId: ${INSTAGRAM_APP_ID:-}
+      Publishing__Instagram__ClientSecret: ${INSTAGRAM_APP_SECRET:-}
+      Publishing__Facebook__ClientId: ${FACEBOOK_APP_ID:-}
+      Publishing__Facebook__ClientSecret: ${FACEBOOK_APP_SECRET:-}
+    volumes:
+      - asset_storage:/app/storage
     ports:
       - "8080:8080"
 
 volumes:
   postgres_data:
+  asset_storage:

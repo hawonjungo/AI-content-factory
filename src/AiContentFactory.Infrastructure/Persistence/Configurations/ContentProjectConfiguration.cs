@@ -35,6 +35,36 @@ public class ContentProjectConfiguration : IEntityTypeConfiguration<ContentProje
             .IsRequired()
             .HasMaxLength(10);
 
+        // Preset ids reference the code-defined catalog (Application/Presets),
+        // so there is no FK to enforce and no seed table to keep in sync.
+        builder.Property(p => p.TemplateId).HasMaxLength(60);
+        builder.Property(p => p.StylePresetId).HasMaxLength(60);
+        builder.Property(p => p.VoicePresetId).HasMaxLength(60);
+        builder.Property(p => p.CaptionPresetId).HasMaxLength(60);
+
+        // Owned types mapped to jsonb: both are read and written whole, never
+        // queried by their individual fields, so a column each beats 15 more
+        // columns on content_projects.
+        builder.OwnsOne(p => p.Captions, captions =>
+        {
+            captions.ToJson();
+        });
+
+        builder.OwnsOne(p => p.Progress, progress =>
+        {
+            progress.ToJson();
+        });
+
+        builder.OwnsOne(p => p.IdeaConfig, idea =>
+        {
+            idea.ToJson();
+        });
+
+        builder.OwnsOne(p => p.LastRenderValidation, validation =>
+        {
+            validation.ToJson();
+        });
+
         builder.Property(p => p.CreatedAt).IsRequired();
         builder.Property(p => p.UpdatedAt).IsRequired();
 

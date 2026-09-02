@@ -13,8 +13,22 @@ RUN dotnet publish src/AiContentFactory.Api/AiContentFactory.Api.csproj -c Relea
 
 FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS runtime
 WORKDIR /app
+
+# fontconfig + the font packages are NOT optional: captions are burned in with
+# ffmpeg's subtitles filter (libass), and the aspnet base image ships no fonts
+# at all - without these every caption renders as tofu boxes. DejaVu covers
+# Vietnamese diacritics; Noto Core covers most other scripts.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ffmpeg \
+        fontconfig \
+        fonts-dejavu-core \
+        fonts-noto-core \
+    && fc-cache -f \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY --from=build /app .
 
+RUN mkdir -p /app/storage
 ENV ASPNETCORE_URLS=http://+:8080
 EXPOSE 8080
 

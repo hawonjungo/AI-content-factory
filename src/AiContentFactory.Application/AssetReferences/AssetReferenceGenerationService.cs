@@ -1,0 +1,211 @@
+using AiContentFactory.Application.ContentProjects;
+using AiContentFactory.Application.Costs;
+using AiContentFactory.Application.Generation;
+using AiContentFactory.Application.Presets;
+using AiContentFactory.Application.Providers;
+using AiContentFactory.Application.Scripts;
+using AiContentFactory.Application.Storage;
+using AiContentFactory.Domain.AssetReferences;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
+
+namespace AiContentFactory.Application.AssetReferences;
+
+/// <param name="Prompt">The full generation prompt (default or user-edited).</param>
+/// <param name="NegativePrompt">Negative prompt actually sent to the provider for this type.</param>
+public record SuggestedReferencePrompt(string Prompt, string NegativePrompt);
+
+public interface IAssetReferenceGenerationService
+{
+    /// <summary>
+    /// Produces <paramref name="count"/> candidate images of one type for the
+    /// user to choose from (Character is always exactly 1). A non-null
+    /// <paramref name="customPrompt"/> is the user-reviewed / edited prompt and
+    /// is sent as-is - the default prompt is never silently substituted.
+    /// </summary>
+    Task GenerateAsync(Guid contentProjectId, AssetReferenceType type, int count, string? customPrompt, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// The default prompt (and negative prompt) this project would use for a
+    /// reference type right now - so the wizard can show it for review/edit
+    /// before spending anything.
+    /// </summary>
+    Task<SuggestedReferencePrompt> BuildSuggestedPromptAsync(Guid contentProjectId, AssetReferenceType type, CancellationToken cancellationToken = default);
+}
+
+public class AssetReferenceGenerationService : IAssetReferenceGenerationService
+{
+    private const int MaxVariants = 4;
+
+    private readonly IContentProjectRepository _projectRepository;
+    private readonly IAssetReferenceRepository _referenceRepository;
+    private readonly IImageGenerationProvider _imageProvider;
+    private readonly IScriptService _scriptService;
+    private readonly IFileStorage _fileStorage;
+    private readonly IAiUsageTracker _usageTracker;
+    private readonly PricingOptions _pricing;
+    private readonly ILogger<AssetReferenceGenerationService> _logger;
+
+    public AssetReferenceGenerationService(
+        IContentProjectRepository projectRepository,
+        IAssetReferenceRepository referenceRepository,
+        IImageGenerationProvider imageProvider,
+        IScriptService scriptService,
+        IFileStorage fileStorage,
+        IAiUsageTracker usageTracker,
+        IOptions<PricingOptions> pricing,
+        ILogger<AssetReferenceGenerationService> logger)
+    {
+        _projectRepository = projectRepository;
+        _referenceRepository = referenceRepository;
+        _imageProvider = imageProvider;
+        _scriptService = scriptService;
+        _fileStorage = fileStorage;
+        _usageTracker = usageTracker;
+        _pricing = pricing.Value;
+        _logger = logger;
+    }
+
+    public async Task<SuggestedReferencePrompt> BuildSuggestedPromptAsync(Guid contentProjectId, AssetReferenceType type, CancellationToken cancellationToken = default)
+    {
+        var project = await _projectRepository.GetByIdAsync(contentProjectId, cancellationToken)
+            ?? throw new InvalidOperationException($"ContentProject '{contentProjectId}' was not found.");
+
+        var style = PresetCatalog.ResolveStyle(project.StylePresetId);
+        var script = await _scriptService.GetByContentProjectIdAsync(contentProjectId, cancellationToken);
+
+        return Resolve(type, project.Title, project.Topic, project.Niche, BuildStoryContext(script), style, customPrompt: null);
+    }
+
+    public async Task GenerateAsync(Guid contentProjectId, AssetReferenceType type, int count, string? customPrompt, CancellationToken cancellationToken = default)
+    {
+        // Character reference is a single reusable anchor - exactly one image.
+        // Other types keep the small-variant behaviour, still capped.
+        count = type == AssetReferenceType.Character ? 1 : Math.Clamp(count, 1, MaxVariants);
+
+        var project = await _projectRepository.GetByIdAsync(contentProjectId, cancellationToken)
+            ?? throw new InvalidOperationException($"ContentProject '{contentProjectId}' was not found.");
+
+        var style = PresetCatalog.ResolveStyle(project.StylePresetId);
+        var script = await _scriptService.GetByContentProjectIdAsync(contentProjectId, cancellationToken);
+        var storyContext = BuildStoryContext(script);
+
+        var resolved = Resolve(type, project.Title, project.Topic, project.Niche, storyContext, style, customPrompt);
+        var prompt = resolved.Prompt;
+        var negativePrompt = resolved.NegativePrompt;
+
+        try
+        {
+            project.ReportProgress(AssetGenerationService.ReferencesStage, 0, count, TypeLabel(type));
+            await _projectRepository.SaveChangesAsync(cancellationToken);
+
+            // Fresh set of variants each time - a superseded/rejected image
+            // shouldn't linger in the picker.
+            await _referenceRepository.ClearVariantsAsync(contentProjectId, type, cancellationToken);
+
+            var created = new List<AssetReference>();
+            for (var i = 0; i < count; i++)
+            {
+                // Gemini's image model returns one image per call, so "count"
+                // is a call loop; there is no provider-side n/count parameter.
+                var image = await _imageProvider.GenerateAsync(new ImageGenerationRequest(prompt, negativePrompt), cancellationToken);
+                var extension = image.MimeType.Contains("png") ? "png" : "jpg";
+                var storedPath = await _fileStorage.SaveAsync(
+                    $"content-projects/{contentProjectId}/asset-references/{type.ToString().ToLowerInvariant()}-{DateTimeOffset.UtcNow:yyyyMMddHHmmss}-{i}.{extension}",
+                    image.ImageBytes,
+                    cancellationToken);
+
+                created.Add(AssetReference.CreateGenerated(contentProjectId, type, storedPath, prompt, image.Model));
+
+                await _usageTracker.RecordAsync(
+                    new RecordUsageInput("gemini", image.Model, "reference_image_generation", _pricing.ImageUsd, contentProjectId, null),
+                    cancellationToken);
+
+                project.ReportProgress(AssetGenerationService.ReferencesStage, i + 1, count, TypeLabel(type));
+                await _projectRepository.SaveChangesAsync(cancellationToken);
+            }
+
+            await _referenceRepository.AddRangeAsync(created, cancellationToken);
+            await _referenceRepository.SaveChangesAsync(cancellationToken);
+
+            project.ClearProgress();
+            await _projectRepository.SaveChangesAsync(cancellationToken);
+            _logger.LogInformation("Generated {Count} {Type} reference variant(s) for {ProjectId}", created.Count, type, contentProjectId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Asset reference generation failed for {ProjectId} ({Type})", contentProjectId, type);
+            var fresh = await _projectRepository.GetByIdAsync(contentProjectId, cancellationToken);
+            if (fresh is not null)
+            {
+                // A reference-image failure is recoverable - don't drag the
+                // project into Failed, just stop showing progress.
+                fresh.ClearProgress();
+                await _projectRepository.SaveChangesAsync(cancellationToken);
+            }
+            throw;
+        }
+    }
+
+    private static string TypeLabel(AssetReferenceType type) =>
+        type == AssetReferenceType.Character ? "Đang tạo ảnh mẫu nhân vật" : "Đang tạo ảnh mẫu bối cảnh";
+
+    /// <summary>
+    /// Turns a type + project context into the exact prompt and negative prompt
+    /// to send. Character uses <see cref="CharacterReferencePromptBuilder"/>
+    /// (photorealistic human, anti-anthro negative); Environment keeps the
+    /// establishing-shot prompt. A non-empty <paramref name="customPrompt"/> is
+    /// sent verbatim (plus the style line), never overridden by the default.
+    /// </summary>
+    private static SuggestedReferencePrompt Resolve(
+        AssetReferenceType type,
+        string title,
+        string? topic,
+        string? niche,
+        string storyContext,
+        StylePreset style,
+        string? customPrompt)
+    {
+        if (type == AssetReferenceType.Character)
+        {
+            var prompt = string.IsNullOrWhiteSpace(customPrompt)
+                ? CharacterReferencePromptBuilder.BuildDefault(title, topic, niche, storyContext, style.VisualStyleGuidance)
+                : $"{customPrompt.Trim()}\n\nVisual style: {style.VisualStyleGuidance}.";
+            // The anti-anthro / anti-distortion negative is applied even to an
+            // edited prompt - it is a safety floor, not part of the wording.
+            return new SuggestedReferencePrompt(prompt, CharacterReferencePromptBuilder.MergeNegative(style.NegativePrompt));
+        }
+
+        var environmentPrompt = string.IsNullOrWhiteSpace(customPrompt)
+            ? BuildEnvironmentPrompt(title, topic, niche, storyContext, style.VisualStyleGuidance)
+            : $"{customPrompt.Trim()}\n\nVisual style: {style.VisualStyleGuidance}.";
+        return new SuggestedReferencePrompt(environmentPrompt, style.NegativePrompt ?? string.Empty);
+    }
+
+    private static string BuildEnvironmentPrompt(string title, string? topic, string? niche, string storyContext, string styleGuidance) => $"""
+        An establishing wide shot of the video's main location: no people,
+        no text, no logos. Clear sense of place, lighting and colour palette
+        that later shots can match. Build the location from the Story Context,
+        not from a generic living room or a portrait background.
+
+        Video title: "{title}"
+        {(string.IsNullOrWhiteSpace(topic) ? "" : $"Topic: {topic}")}
+        {(string.IsNullOrWhiteSpace(niche) ? "" : $"Niche: {niche}")}
+        Story Context (authoritative for the setting):
+        {storyContext}
+
+        Visual style: {styleGuidance}.
+        """;
+
+    private static string BuildStoryContext(ScriptResponse? script)
+    {
+        if (script is null) return "No script is available yet.";
+
+        var text = string.Join("\n", new[]
+        {
+            script.Hook, script.Introduction, script.Body, script.Escalation, script.Payoff
+        }.Where(value => !string.IsNullOrWhiteSpace(value)));
+
+        return text.Length <= 2_500 ? text : text[..2_500];
+    }
+}

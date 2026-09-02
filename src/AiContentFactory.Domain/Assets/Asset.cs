@@ -56,4 +56,20 @@ public class Asset : BaseEntity
         Status = AssetStatus.Failed;
         Touch();
     }
+
+    /// <summary>
+    /// Retires this asset in favour of a newer one for the same scene. The
+    /// file is deliberately left on disk - a regenerated clip can come out
+    /// worse than the one it replaced, and Veo credits are not refundable.
+    /// </summary>
+    public void MarkSuperseded()
+    {
+        if (Status != AssetStatus.Ready)
+        {
+            return;
+        }
+
+        Status = AssetStatus.Superseded;
+        Touch();
+    }
 }

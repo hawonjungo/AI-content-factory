@@ -1,0 +1,462 @@
+/*
+ * Scoped to .wz so the original Advanced page (all inline styles) is
+ * untouched. index.css is the leftover Vite template and centres everything
+ * inside #root, which is why .wz resets alignment explicitly.
+ */
+
+.wz {
+  --wz-radius: 12px;
+  --wz-gap: 16px;
+
+  text-align: left;
+  max-width: 940px;
+  margin: 0 auto;
+  padding: 24px 20px 80px;
+  box-sizing: border-box;
+  font: 15px/1.5 var(--sans);
+  color: var(--text);
+}
+
+.wz h1 {
+  font-size: 26px;
+  letter-spacing: -0.4px;
+  margin: 0 0 4px;
+}
+
+.wz h2 {
+  font-size: 19px;
+  margin: 0 0 6px;
+}
+
+.wz h3 {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-h);
+  margin: 0 0 8px;
+}
+
+.wz-sub {
+  color: var(--text);
+  opacity: 0.8;
+  margin: 0 0 20px;
+  font-size: 14px;
+}
+
+.wz-card {
+  border: 1px solid var(--border);
+  border-radius: var(--wz-radius);
+  padding: 18px;
+  margin-bottom: var(--wz-gap);
+  background: var(--bg);
+}
+
+/* --- step nav --- */
+
+.wz-steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 22px;
+  padding: 0;
+  list-style: none;
+}
+
+.wz-step {
+  flex: 1 1 120px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 8px 12px;
+  font-size: 13px;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  text-align: center;
+  white-space: nowrap;
+  font-family: inherit;
+}
+
+.wz-step[aria-current="step"] {
+  border-color: var(--accent-border);
+  background: var(--accent-bg);
+  color: var(--text-h);
+  font-weight: 600;
+}
+
+.wz-step:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* --- buttons --- */
+
+.wz-btn {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 9px 16px;
+  font: inherit;
+  font-size: 14px;
+  background: transparent;
+  color: var(--text-h);
+  cursor: pointer;
+}
+
+.wz-btn:hover:not(:disabled) {
+  border-color: var(--accent-border);
+}
+
+.wz-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.wz-btn-primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}
+
+.wz-btn-sm {
+  padding: 6px 11px;
+  font-size: 13px;
+}
+
+.wz-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: center;
+  margin-top: 18px;
+}
+
+/* --- forms --- */
+
+.wz-field {
+  display: block;
+  margin-bottom: 14px;
+}
+
+.wz-field > span {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-h);
+  margin-bottom: 5px;
+}
+
+.wz-field input[type="text"],
+.wz-field input[type="number"],
+.wz-field select,
+.wz-field textarea {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 9px 11px;
+  font: inherit;
+  font-size: 14px;
+  background: var(--bg);
+  color: var(--text-h);
+}
+
+.wz-field textarea {
+  resize: vertical;
+}
+
+.wz-hint {
+  font-size: 12.5px;
+  opacity: 0.75;
+  margin-top: 4px;
+}
+
+.wz-row {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.wz-row > * {
+  flex: 1 1 160px;
+}
+
+/* --- preset cards --- */
+
+.wz-presets {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 10px;
+}
+
+.wz-preset {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px;
+  text-align: left;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+}
+
+.wz-preset:hover {
+  border-color: var(--accent-border);
+}
+
+.wz-preset[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: var(--accent-bg);
+}
+
+.wz-preset strong {
+  display: block;
+  color: var(--text-h);
+  font-size: 14px;
+  margin-bottom: 3px;
+}
+
+/* --- progress --- */
+
+.wz-progress {
+  border: 1px solid var(--accent-border);
+  background: var(--accent-bg);
+  border-radius: var(--wz-radius);
+  padding: 14px 16px;
+  margin-bottom: var(--wz-gap);
+}
+
+.wz-bar {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--border);
+  overflow: hidden;
+  margin-top: 8px;
+}
+
+.wz-bar > div {
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.4s ease;
+}
+
+/* --- estimate --- */
+
+.wz-estimate table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13.5px;
+}
+
+.wz-estimate td {
+  padding: 5px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.wz-estimate td:last-child,
+.wz-estimate td:nth-child(2) {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.wz-estimate tr:last-child td {
+  border-bottom: none;
+  font-weight: 600;
+  color: var(--text-h);
+}
+
+/* --- clips --- */
+
+.wz-clips {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 14px;
+}
+
+.wz-clip {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px;
+}
+
+.wz-clip video,
+.wz-clip img,
+.wz-clip .wz-clip-empty {
+  width: 100%;
+  aspect-ratio: 9 / 16;
+  max-height: 320px;
+  border-radius: 8px;
+  background: var(--code-bg);
+  object-fit: cover;
+  display: block;
+  margin-bottom: 9px;
+}
+
+.wz-clip video {
+  object-fit: contain;
+}
+
+.wz-clip-empty {
+  display: grid;
+  place-items: center;
+  font-size: 13px;
+  opacity: 0.7;
+  text-align: center;
+  padding: 8px;
+}
+
+.wz-badge {
+  display: inline-block;
+  border-radius: 999px;
+  padding: 2px 9px;
+  font-size: 11.5px;
+  font-weight: 600;
+  border: 1px solid var(--border);
+}
+
+.wz-badge-ready {
+  border-color: #1a7f37;
+  color: #1a7f37;
+}
+.wz-badge-working {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.wz-badge-failed {
+  border-color: crimson;
+  color: crimson;
+}
+
+/* --- misc --- */
+
+.wz-error {
+  border: 1px solid crimson;
+  border-radius: 8px;
+  padding: 11px 14px;
+  color: crimson;
+  margin-bottom: var(--wz-gap);
+  font-size: 14px;
+}
+
+.wz-blockers {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 13.5px;
+}
+
+.wz-footer {
+  margin-top: 36px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+  font-size: 12.5px;
+  opacity: 0.7;
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.wz-caption-preview {
+  width: 100%;
+  max-width: 300px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  display: block;
+}
+
+/* ---- Phase 4: idea config, credits, attempts, composition status ---- */
+
+.wz-radios {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 6px 0;
+}
+
+.wz-credits,
+.wz-attempts,
+.wz-compo {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px 14px;
+  margin: 0 0 14px;
+}
+
+.wz-kv {
+  display: flex;
+  gap: 18px;
+  flex-wrap: wrap;
+  font-size: 13.5px;
+}
+
+.wz-kv > span {
+  display: flex;
+  flex-direction: column;
+}
+
+.wz-kv-k {
+  opacity: 0.7;
+  font-size: 12px;
+}
+
+.wz-kv-v {
+  font-weight: 600;
+  font-size: 16px;
+  color: var(--text-h);
+}
+
+.wz-attempts ul,
+.wz-compo ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.wz-attempts li {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  font-size: 13px;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.wz-attempts li:last-child {
+  border-bottom: none;
+}
+
+.wz-attempt-what {
+  flex: 1 1 40%;
+}
+
+.wz-attempt-cost {
+  opacity: 0.75;
+}
+
+.wz-attempt-error {
+  flex-basis: 100%;
+  color: #b42318;
+  font-size: 12.5px;
+}
+
+.wz-compo li {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+  font-size: 13.5px;
+}
+
+.wz-compo li > span:first-child {
+  min-width: 150px;
+}
+
+.wz-validate {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin: 0 0 6px;
+}

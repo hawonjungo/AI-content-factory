@@ -18,7 +18,7 @@ public class ScriptsController : ControllerBase
     public async Task<ActionResult<ScriptResponse>> Get(Guid contentProjectId, CancellationToken cancellationToken)
     {
         var script = await _service.GetByContentProjectIdAsync(contentProjectId, cancellationToken);
-        return script is null ? NoContent() : Ok(script);
+        return script is null ? NotFound() : Ok(script);
     }
 
     [HttpPut]

@@ -1,8 +1,10 @@
+using AiContentFactory.Api.Infrastructure;
 using AiContentFactory.Api.Middleware;
 using AiContentFactory.Application;
 using AiContentFactory.Infrastructure;
 using AiContentFactory.Infrastructure.Persistence;
 using Hangfire;
+using Hangfire.Dashboard;
 using HealthChecks.NpgSql;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Hosting;
@@ -23,7 +25,8 @@ try
         .Enrich.FromLogContext());
 
     // ---- Services ----
-    builder.Services.AddControllers();
+    builder.Services.AddControllers()
+        .AddJsonOptions(options => options.JsonSerializerOptions.Converters.Add(new System.Text.Json.Serialization.JsonStringEnumConverter()));
     builder.Services.AddEndpointsApiExplorer();
     builder.Services.AddSwaggerGen();
 
@@ -36,26 +39,29 @@ try
     builder.Services.AddHealthChecks()
         .AddNpgSql(postgresConnectionString, name: "postgres");
 
-builder.Services.AddCors(options =>
-{
-    options.AddPolicy("Frontend", policy =>
+    builder.Services.AddCors(options =>
     {
-        if (builder.Environment.IsDevelopment())
+        options.AddPolicy("Frontend", policy =>
         {
-            policy.SetIsOriginAllowed(origin =>
-                Uri.TryCreate(origin, UriKind.Absolute, out var uri) &&
-                (uri.Host is "localhost" or "127.0.0.1"));
-        }
-        else
-        {
-            var origins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>()
-                ?? Array.Empty<string>();
-            policy.WithOrigins(origins);
-        }
+            if (builder.Environment.IsDevelopment())
+            {
+                // Vite picks the next free port (5173, 5174, ...) if one is
+                // already in use, so pin to "any localhost port" in dev
+                // rather than a single hardcoded origin.
+                policy.SetIsOriginAllowed(origin =>
+                    Uri.TryCreate(origin, UriKind.Absolute, out var uri) &&
+                    (uri.Host is "localhost" or "127.0.0.1"));
+            }
+            else
+            {
+                var origins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>()
+                    ?? Array.Empty<string>();
+                policy.WithOrigins(origins);
+            }
 
-        policy.AllowAnyHeader().AllowAnyMethod();
+            policy.AllowAnyHeader().AllowAnyMethod();
+        });
     });
-});
 
     var app = builder.Build();
 
@@ -82,7 +88,10 @@ builder.Services.AddCors(options =>
 
     app.MapControllers();
     app.MapHealthChecks("/health");
-    app.UseHangfireDashboard("/jobs");
+    app.UseHangfireDashboard("/jobs", new DashboardOptions
+    {
+        Authorization = new[] { new AllowAllDashboardAuthorizationFilter() }
+    });
 
     app.Run();
 }

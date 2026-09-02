@@ -1,3 +1,4 @@
+using AiContentFactory.Application.Presets;
 using AiContentFactory.Domain.ContentProjects;
 
 namespace AiContentFactory.Application.ContentProjects;
@@ -13,13 +14,34 @@ public class ContentProjectService : IContentProjectService
 
     public async Task<ContentProjectResponse> CreateAsync(CreateContentProjectRequest request, CancellationToken cancellationToken = default)
     {
+        var template = PresetCatalog.FindTemplate(request.TemplateId);
+
         var project = ContentProject.Create(
             request.Title,
             request.Topic,
-            request.Niche,
+            // A template's niche is a sensible default but never overrides one
+            // the user typed.
+            request.Niche ?? template?.Niche,
             request.TargetDurationSeconds,
-            request.AspectRatio ?? "9:16",
+            request.AspectRatio ?? template?.DefaultAspectRatio ?? "9:16",
             request.Language ?? "en");
+
+        if (template is not null || request.StylePresetId is not null || request.VoicePresetId is not null || request.CaptionPresetId is not null)
+        {
+            var captionPresetId = request.CaptionPresetId ?? template?.DefaultCaptionPresetId;
+
+            project.ApplyPresets(
+                template?.Id,
+                request.StylePresetId ?? template?.DefaultStylePresetId,
+                request.VoicePresetId ?? template?.DefaultVoicePresetId,
+                captionPresetId,
+                PresetCatalog.FindCaption(captionPresetId)?.Settings);
+        }
+
+        if (request.IdeaConfig is not null)
+        {
+            project.UpdateIdeaConfig(request.IdeaConfig.ToDomain());
+        }
 
         await _repository.AddAsync(project, cancellationToken);
         await _repository.SaveChangesAsync(cancellationToken);
@@ -48,6 +70,10 @@ public class ContentProjectService : IContentProjectService
         }
 
         project.UpdateDetails(request.Title, request.Topic, request.Niche, request.TargetDurationSeconds);
+        if (request.IdeaConfig is not null)
+        {
+            project.UpdateIdeaConfig(request.IdeaConfig.ToDomain());
+        }
         await _repository.SaveChangesAsync(cancellationToken);
 
         return ContentProjectResponse.FromDomain(project);
