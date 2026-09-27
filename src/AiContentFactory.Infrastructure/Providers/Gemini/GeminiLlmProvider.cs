@@ -30,6 +30,8 @@ public class GeminiLlmProvider : ILlmProvider
         _logger = logger;
     }
 
+    public bool IsConfigured => !string.IsNullOrWhiteSpace(_options.ApiKey);
+
     public async Task<string> GenerateAsync(string systemPrompt, string userPrompt, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(_options.ApiKey))
@@ -59,6 +61,11 @@ public class GeminiLlmProvider : ILlmProvider
             }
         };
 
+        if (_options.MaxOutputTokens is { } maxTokens)
+        {
+            requestBody["generationConfig"]!["maxOutputTokens"] = maxTokens;
+        }
+
         var url = $"{_options.BaseUrl}/models/{_options.Model}:generateContent?key={_options.ApiKey}";
 
         const int maxAttempts = 2;
@@ -74,8 +81,21 @@ public class GeminiLlmProvider : ILlmProvider
 
                 if (!response.IsSuccessStatusCode)
                 {
-                    throw new HttpRequestException(
-                        $"Gemini API returned {(int)response.StatusCode} {response.StatusCode}: {Truncate(responseBody, 500)}");
+                    var detail = $"Gemini API returned {(int)response.StatusCode} {response.StatusCode}: {Truncate(responseBody, 500)}";
+
+                    // 429 (rate limit) / 402 (payment required - some proxies/
+                    // gateways use this for exhausted credits) / RESOURCE_EXHAUSTED
+                    // all mean a quota or billing spend cap was hit - a distinct,
+                    // non-retryable condition. ILlmRouter treats this like any
+                    // other failure and falls back to the configured secondary
+                    // provider (e.g. Groq) instead of failing the request outright.
+                    if ((int)response.StatusCode is 429 or 402 ||
+                        responseBody.Contains("RESOURCE_EXHAUSTED", StringComparison.OrdinalIgnoreCase))
+                    {
+                        throw new LlmQuotaExceededException(detail);
+                    }
+
+                    throw new HttpRequestException(detail);
                 }
 
                 return ExtractText(responseBody);
@@ -102,10 +122,24 @@ public class GeminiLlmProvider : ILlmProvider
 
         var firstCandidate = candidates[0];
 
-        if (firstCandidate.TryGetProperty("finishReason", out var finishReason) &&
-            finishReason.GetString() is "SAFETY" or "RECITATION" or "BLOCKLIST")
+        if (firstCandidate.TryGetProperty("finishReason", out var finishReason))
         {
-            throw new InvalidOperationException($"Gemini API blocked the response (finishReason: {finishReason.GetString()}).");
+            var reason = finishReason.GetString();
+
+            if (reason is "SAFETY" or "RECITATION" or "BLOCKLIST")
+            {
+                throw new InvalidOperationException($"Gemini API blocked the response (finishReason: {reason}).");
+            }
+
+            // The model was cut off before finishing - almost always leaves
+            // truncated/invalid JSON behind. Distinct exception so this is
+            // diagnosable (see LlmResponseTruncatedException) rather than
+            // surfacing as an opaque "invalid JSON" parse error further up.
+            if (reason == "MAX_TOKENS")
+            {
+                throw new LlmResponseTruncatedException(
+                    "Gemini API response was truncated (finishReason: MAX_TOKENS) - the configured MaxOutputTokens was reached before the model finished. Consider raising Llm:Gemini:MaxOutputTokens if this recurs.");
+            }
         }
 
         var text = firstCandidate

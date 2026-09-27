@@ -42,12 +42,18 @@ public class SceneConfiguration : IEntityTypeConfiguration<Scene>
         builder.Property(s => s.NegativePrompt).HasColumnType("text");
         builder.Property(s => s.AllocationRationale).HasColumnType("text");
         builder.Property(s => s.AudioTimingJson).HasColumnType("jsonb");
+        builder.Property(s => s.RelevantReferenceLabelsText).HasColumnType("text");
         builder.Property(s => s.ModelTier).HasMaxLength(20);
         builder.Property(s => s.SkipGeneration).HasDefaultValue(false);
+        builder.Property(s => s.KeyframeImagePrompt).HasColumnType("text");
+        builder.Property(s => s.MotionPrompt).HasColumnType("text");
+        builder.Property(s => s.ClipCheckJson).HasColumnType("text");
 
         builder.Property(s => s.VisualType).HasConversion<string>().HasMaxLength(30);
         builder.Property(s => s.Status).HasConversion<string>().HasMaxLength(30);
         builder.Property(s => s.CameraMovement).HasConversion<string>().HasMaxLength(20).HasDefaultValue(CameraMovement.Unspecified);
+        builder.Property(s => s.KeyframeStatus).HasConversion<string>().HasMaxLength(20).HasDefaultValue(KeyframeStatus.None);
+        builder.Property(s => s.ShotSize).HasConversion<string>().HasMaxLength(20).HasDefaultValue(ShotSize.Unspecified);
 
         builder.HasIndex(s => new { s.StoryboardId, s.SceneNumber }).IsUnique();
     }

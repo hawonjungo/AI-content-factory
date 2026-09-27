@@ -1,0 +1,26 @@
+{
+  "name": "google-flow-runner",
+  "version": "0.1.0",
+  "private": true,
+  "description": "OPTIONAL local Playwright automation that drives the Google Flow (labs.google/flow) web UI to generate Step 5 AI video clips and import them back into AI Content Factory via its existing HTTP API. This does NOT replace the manual copy/paste + upload workflow, which remains the primary/fallback path. Never calls a paid API on the user's behalf - it drives the free labs.google/flow web UI with the user's own session/credits.",
+  "main": "dist/src/cli.js",
+  "bin": {
+    "google-flow-runner": "dist/src/cli.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "start": "node dist/src/cli.js",
+    "preserve": "npm run build",
+    "serve": "node dist/src/server.js",
+    "pretest": "npm run build",
+    "test": "node --test dist/tests/*.test.js"
+  },
+  "dependencies": {
+    "playwright": "^1.47.2"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.2",
+    "@types/node": "^22.7.4"
+  }
+}

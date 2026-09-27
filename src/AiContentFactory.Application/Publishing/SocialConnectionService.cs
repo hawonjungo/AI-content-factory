@@ -31,6 +31,13 @@ public interface ISocialConnectionService
     /// is not connected or the refresh failed (the connection is marked Expired).
     /// </summary>
     Task<UsableAccessToken> GetUsableAccessTokenAsync(PublishTarget platform, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// The privacy/visibility choices the Step 7 UI should offer for this
+    /// platform right now (see <see cref="ISocialPlatformPublisher.GetPublishOptionsAsync"/>).
+    /// Throws when the platform isn't connected, same as <see cref="GetUsableAccessTokenAsync"/>.
+    /// </summary>
+    Task<PlatformPublishOptions> GetPublishOptionsAsync(PublishTarget platform, CancellationToken cancellationToken = default);
 }
 
 public record UsableAccessToken(string AccessToken, string? AccountId);
@@ -227,14 +234,44 @@ public class SocialConnectionService : ISocialConnectionService
             }
             catch (Exception ex)
             {
-                connection.MarkExpired();
-                await _connections.SaveChangesAsync(cancellationToken);
-                _logger.LogWarning(ex, "Token refresh failed for {Platform}", platform);
-                throw new PublishException($"Không làm mới được phiên {platform}, hãy kết nối lại.", retryable: false, ex);
+                // A provider-side outage (5xx/timeout/rate limit) is transient: the
+                // refresh token itself may still be perfectly valid, so don't kill the
+                // connection over it - that would force a needless reconnect. Only a
+                // genuinely permanent failure (invalid_grant / revoked / undecryptable
+                // token) should mark the connection Expired.
+                var retryable = ex is PublishException { Retryable: true };
+                if (!retryable)
+                {
+                    connection.MarkExpired();
+                    await _connections.SaveChangesAsync(cancellationToken);
+                }
+                _logger.LogWarning(ex, "Token refresh failed for {Platform} (retryable={Retryable})", platform, retryable);
+                throw new PublishException(
+                    retryable
+                        ? $"Làm mới phiên {platform} tạm thời thất bại, sẽ thử lại sau."
+                        : $"Không làm mới được phiên {platform}, hãy kết nối lại.",
+                    retryable, ex);
             }
         }
 
+        var requiredScope = _publishers.TryGetValue(platform, out var configuredPublisher) ? configuredPublisher.RequiredScope : null;
+        if (requiredScope is not null &&
+            (string.IsNullOrWhiteSpace(connection.Scope) ||
+             !connection.Scope.Split(' ', StringSplitOptions.RemoveEmptyEntries).Contains(requiredScope, StringComparer.Ordinal)))
+        {
+            throw new PublishException(
+                $"Kết nối {platform} thiếu quyền '{requiredScope}'. Hãy ngắt kết nối và kết nối lại, đồng ý cấp đủ quyền khi được Google hỏi.",
+                retryable: false);
+        }
+
         return new UsableAccessToken(_tokenProtector.Unprotect(connection.AccessTokenEncrypted!), connection.ExternalAccountId);
+    }
+
+    public async Task<PlatformPublishOptions> GetPublishOptionsAsync(PublishTarget platform, CancellationToken cancellationToken = default)
+    {
+        var publisher = RequireConfigured(platform);
+        var token = await GetUsableAccessTokenAsync(platform, cancellationToken);
+        return await publisher.GetPublishOptionsAsync(token.AccessToken, cancellationToken);
     }
 
     private ISocialPlatformPublisher RequireConfigured(PublishTarget platform)

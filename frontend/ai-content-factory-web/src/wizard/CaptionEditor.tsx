@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import {
   apiUrl,
+  describeApiError,
   wizardApi,
   type CaptionAnimation,
   type CaptionPosition,
@@ -66,7 +67,7 @@ export function CaptionEditor({
       await wizardApi.updateCaptions(contentProjectId, draft);
       onSaved();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Không lưu được cài đặt phụ đề.");
+      setError(describeApiError(err, "Không lưu được cài đặt phụ đề."));
     } finally {
       setSaving(false);
     }
@@ -83,7 +84,7 @@ export function CaptionEditor({
       setLocalPreview(result.previewUrl);
       onSaved();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Chưa xem trước được - cần ít nhất một clip hoặc ảnh mẫu.");
+      setError(describeApiError(err, "Chưa xem trước được - cần ít nhất một clip hoặc ảnh mẫu."));
     } finally {
       setPreviewing(false);
     }

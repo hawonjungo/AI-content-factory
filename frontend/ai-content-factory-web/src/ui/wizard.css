@@ -8,6 +8,15 @@
   --wz-radius: 12px;
   --wz-gap: 16px;
 
+  /* Spacing scale - new call sites should prefer these over ad hoc pixel
+     values; existing inline spacing elsewhere is left as-is for this pass. */
+  --wz-space-1: 4px;
+  --wz-space-2: 8px;
+  --wz-space-3: 12px;
+  --wz-space-4: 16px;
+  --wz-space-5: 24px;
+  --wz-space-6: 32px;
+
   text-align: left;
   max-width: 940px;
   margin: 0 auto;
@@ -48,6 +57,13 @@
   padding: 18px;
   margin-bottom: var(--wz-gap);
   background: var(--bg);
+}
+
+/* A card that needs attention (e.g. a failed project in a list) - reuses the
+   same crimson already used by .wz-badge-failed/.wz-error rather than a new
+   color, just as a quiet left accent instead of another badge. */
+.wz-card-alert {
+  border-left: 3px solid crimson;
 }
 
 /* --- step nav --- */
@@ -119,6 +135,18 @@
 .wz-btn-sm {
   padding: 6px 11px;
   font-size: 13px;
+}
+
+/* Destructive actions (delete, disconnect) - deliberately not filled, so it
+   never outweighs a screen's actual primary action; the crimson border/text
+   alone (same tone as .wz-error/.wz-badge-failed) is enough to read as risky. */
+.wz-btn-danger {
+  border-color: crimson;
+  color: crimson;
+}
+
+.wz-btn-danger:hover:not(:disabled) {
+  background: rgba(220, 20, 60, 0.08);
 }
 
 .wz-actions {
@@ -326,6 +354,10 @@
   border-color: crimson;
   color: crimson;
 }
+.wz-badge-warning {
+  border-color: #b8860b;
+  color: #b8860b;
+}
 
 /* --- misc --- */
 
@@ -342,6 +374,55 @@
   margin: 0;
   padding-left: 18px;
   font-size: 13.5px;
+}
+
+/* --- loading --- */
+
+.wz-loading {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--wz-space-2);
+  color: var(--text);
+  font-size: 14px;
+}
+
+.wz-spinner {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: wz-spin 0.7s linear infinite;
+}
+
+@keyframes wz-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* --- empty state --- */
+
+.wz-empty {
+  border: 1px dashed var(--border);
+  border-radius: 10px;
+  padding: var(--wz-space-5);
+  text-align: center;
+  color: var(--text);
+}
+
+.wz-empty strong {
+  display: block;
+  color: var(--text-h);
+  font-size: 15px;
+  margin-bottom: var(--wz-space-1);
+}
+
+.wz-empty p {
+  margin: 0 auto;
+  max-width: 420px;
 }
 
 .wz-footer {
@@ -459,4 +540,558 @@
   gap: 10px;
   align-items: center;
   margin: 0 0 6px;
+}
+
+/* ---- Step 2: AI content idea suggestions ---- */
+
+.wz-ideas-teaser {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+  border: 1px dashed var(--accent-border);
+  background: var(--accent-bg);
+  border-radius: 10px;
+  padding: 12px 14px;
+  margin: 0 0 18px;
+}
+
+.wz-ideas-teaser > div {
+  flex: 1 1 220px;
+}
+
+.wz-ideas {
+  border: 1px solid var(--accent-border);
+  border-radius: 10px;
+  padding: 14px;
+  margin: 0 0 18px;
+  background: var(--accent-bg);
+}
+
+.wz-ideas-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.wz-ideas-controls {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  margin-bottom: 6px;
+}
+
+.wz-ideas-label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-h);
+  margin-bottom: 5px;
+}
+
+.wz-ideas-niche select {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font: inherit;
+  font-size: 13.5px;
+  background: var(--bg);
+  color: var(--text-h);
+  min-width: 190px;
+}
+
+.wz-seg {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.wz-seg-btn {
+  border: 0;
+  border-right: 1px solid var(--border);
+  padding: 8px 14px;
+  font: inherit;
+  font-size: 13.5px;
+  background: var(--bg);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.wz-seg-btn:last-child {
+  border-right: 0;
+}
+
+.wz-seg-btn[aria-pressed="true"] {
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}
+
+.wz-seg-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.wz-ideas-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 12px;
+}
+
+.wz-idea-card {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px;
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.wz-idea-card[data-used="true"] {
+  border-color: #1a7f37;
+  box-shadow: 0 0 0 1px #1a7f37 inset;
+}
+
+.wz-idea-head {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+}
+
+.wz-idea-head strong {
+  font-size: 14px;
+  color: var(--text-h);
+  line-height: 1.35;
+}
+
+.wz-idea-rank {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+.wz-idea-niche {
+  font-size: 12px;
+  font-weight: 600;
+  opacity: 0.75;
+}
+
+.wz-idea-concept {
+  font-size: 13px;
+  margin: 2px 0;
+}
+
+.wz-idea-scores {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin: 4px 0 2px;
+}
+
+.wz-idea-card .wz-btn {
+  margin-top: auto;
+  align-self: flex-start;
+}
+
+/* ---- cost visibility note (next to AI / billable buttons) ---- */
+
+.wz-cost-note {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  line-height: 1.35;
+  opacity: 0.8;
+  color: var(--text);
+}
+
+/* ---- Step 5: free-first scene list ---- */
+
+.wz-hero {
+  border: 1px solid var(--accent-border);
+  background: var(--accent-bg);
+  border-radius: var(--wz-radius);
+  padding: var(--wz-space-5);
+  margin-bottom: var(--wz-gap);
+}
+
+.wz-hero h2 {
+  margin-bottom: var(--wz-space-1);
+}
+
+.wz-plan-summary {
+  display: flex;
+  gap: var(--wz-space-5);
+  flex-wrap: wrap;
+  align-items: baseline;
+  font-size: 14px;
+  margin: var(--wz-space-2) 0 var(--wz-gap);
+}
+
+.wz-plan-summary strong {
+  font-size: 20px;
+  color: var(--text-h);
+}
+
+.wz-scene-card {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: var(--wz-space-3);
+  margin-bottom: var(--wz-space-2);
+  background: var(--bg);
+}
+
+/* Left accent border is the at-a-glance video/image signal - readable even
+   scanning the page quickly, on top of the text badge (never color alone). */
+.wz-scene-card[data-kind="video"] {
+  border-left: 3px solid var(--accent);
+}
+
+.wz-scene-card[data-kind="image"] {
+  border-left: 3px solid var(--border);
+}
+
+.wz-scene-card[data-kind="motion"] {
+  border-left: 3px solid #b8860b;
+}
+
+.wz-scene-head {
+  display: flex;
+  align-items: center;
+  gap: var(--wz-space-2);
+  flex-wrap: wrap;
+}
+
+/* ---- Step 5: media-type selector + preset panel ---- */
+
+.wz-media-select {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 9px;
+  font: inherit;
+  font-size: 13px;
+  background: var(--bg);
+  color: var(--text-h);
+  max-width: 100%;
+}
+
+.wz-override-tag {
+  display: inline-block;
+  border-radius: 999px;
+  padding: 2px 9px;
+  font-size: 11px;
+  font-weight: 600;
+  border: 1px solid #b8860b;
+  color: #b8860b;
+}
+
+.wz-preset-scroll {
+  display: flex;
+  gap: var(--wz-space-2);
+  overflow-x: auto;
+  padding-bottom: 4px;
+  margin-bottom: 4px;
+  /* Horizontal scroll lives inside this container only, so a narrow preset
+     row never forces the page itself to scroll sideways. */
+}
+
+.wz-preset-chip {
+  flex: 0 0 auto;
+  min-width: 150px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  text-align: left;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  font: inherit;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.wz-preset-chip:hover:not(:disabled) {
+  border-color: var(--accent-border);
+}
+
+.wz-preset-chip[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: var(--accent-bg);
+}
+
+.wz-preset-chip strong {
+  font-size: 13.5px;
+  color: var(--text-h);
+}
+
+.wz-scene-type {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-weight: 700;
+  font-size: 12px;
+  letter-spacing: 0.3px;
+}
+
+.wz-scene-type[data-kind="video"] {
+  color: var(--accent);
+}
+
+.wz-scene-type[data-kind="image"] {
+  color: var(--text);
+  opacity: 0.75;
+}
+
+.wz-scene-desc {
+  font-size: 13px;
+  margin: var(--wz-space-2) 0;
+  opacity: 0.85;
+}
+
+.wz-scene-ref {
+  height: 44px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  object-fit: cover;
+}
+
+/* Narrow viewports: stack the scene header vertically instead of letting a
+   long select/badge row squeeze itself unreadable, and make the media
+   selector reachable at full width instead of a thin flex remainder. */
+@media (max-width: 480px) {
+  .wz-scene-head {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .wz-media-select {
+    width: 100%;
+  }
+
+  .wz-preset-chip {
+    min-width: 130px;
+  }
+}
+
+/* ---- sticky bottom action bar ---- */
+
+.wz-sticky-bar {
+  position: sticky;
+  bottom: var(--wz-space-2);
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: var(--wz-space-3);
+  flex-wrap: wrap;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--wz-radius);
+  padding: var(--wz-space-3) var(--wz-space-4);
+  margin: var(--wz-gap) 0;
+  box-shadow: var(--shadow);
+}
+
+.wz-sticky-bar-summary {
+  font-size: 13px;
+  color: var(--text-h);
+  font-weight: 600;
+  flex: 1 1 auto;
+  min-width: 140px;
+}
+
+@media (max-width: 640px) {
+  .wz-sticky-bar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .wz-sticky-bar .wz-btn {
+    width: 100%;
+    text-align: center;
+  }
+}
+
+/* ---- collapsed "advanced" sections (per-clip editing, Veo API) ---- */
+
+.wz-advanced {
+  border: 1px solid var(--border);
+  border-radius: var(--wz-radius);
+  padding: var(--wz-space-3) var(--wz-space-4);
+  margin-bottom: var(--wz-gap);
+}
+
+.wz-advanced > summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--text-h);
+  list-style: none;
+}
+
+.wz-advanced > summary::-webkit-details-marker {
+  display: none;
+}
+
+.wz-advanced[open] > summary {
+  margin-bottom: var(--wz-space-3);
+}
+
+/* ---- Step 6 audio / voice mode selector ---- */
+
+.wz-audio-modes {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.wz-audio-opt {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.wz-audio-opt[data-active="true"] {
+  border-color: var(--accent);
+  background: var(--accent-bg);
+}
+
+.wz-audio-opt input {
+  margin-top: 3px;
+  flex-shrink: 0;
+}
+
+.wz-audio-opt strong {
+  color: var(--text-h);
+}
+
+/* ---- top nav strip: Video vs Stories/Series ---- */
+
+.wz-topnav {
+  display: flex;
+  gap: var(--wz-space-4);
+  max-width: 940px;
+  margin: 0 auto;
+  padding: 16px 20px 0;
+}
+
+.wz-topnav-link {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  text-decoration: none;
+  padding-bottom: 4px;
+  border-bottom: 2px solid transparent;
+}
+
+.wz-topnav-link:hover {
+  color: var(--text-h);
+}
+
+.wz-topnav-link-active {
+  color: var(--text-h);
+  border-bottom-color: var(--accent);
+}
+
+/* ---- Stories: episode timeline ---- */
+
+.wz-story-timeline {
+  list-style: none;
+  margin: 0;
+  padding: 0 0 0 2px;
+  border-left: 2px solid var(--border);
+}
+
+.wz-story-episode {
+  position: relative;
+  padding: 0 0 var(--wz-space-4) var(--wz-space-4);
+}
+
+.wz-story-episode::before {
+  content: "";
+  position: absolute;
+  left: -6px;
+  top: 7px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.wz-story-episode-head {
+  display: flex;
+  align-items: center;
+  gap: var(--wz-space-2);
+  flex-wrap: wrap;
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+
+.wz-story-episode-detail {
+  margin-top: var(--wz-space-2);
+  padding: var(--wz-space-3) var(--wz-space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--wz-radius);
+  background: var(--bg);
+}
+
+/* ---- Stories: character / location cards ---- */
+
+.wz-story-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: var(--wz-space-3);
+  margin-bottom: var(--wz-space-3);
+}
+
+.wz-story-entity-card {
+  border: 1px solid var(--border);
+  border-radius: var(--wz-radius);
+  padding: var(--wz-space-3);
+  background: var(--bg);
+}
+
+.wz-story-entity-card strong {
+  display: block;
+  color: var(--text-h);
+  margin-bottom: 4px;
+}
+
+/* ---- Stories: small labeled blocks used inside Bible / outline / state panels ---- */
+
+.wz-story-block {
+  margin-bottom: var(--wz-space-3);
+}
+
+.wz-story-block h4 {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-h);
+  margin: 0 0 4px;
+}
+
+.wz-story-block ul {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 14px;
+}
+
+.wz-story-block p {
+  margin: 0;
+  font-size: 14px;
 }

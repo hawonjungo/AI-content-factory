@@ -1,3 +1,4 @@
+using AiContentFactory.Application.Agents;
 using AiContentFactory.Application.ContentProjects;
 using AiContentFactory.Application.Scripts;
 using AiContentFactory.Application.Storyboards;
@@ -5,6 +6,21 @@ using AiContentFactory.Domain.ContentProjects;
 using AiContentFactory.Domain.Storyboards;
 
 namespace AiContentFactory.Tests.Fakes;
+
+/// <summary>Captures the last <see cref="PromptAgentInput"/> it was asked to turn into shot data - so tests can assert a caller wired StoryVisualContext (or didn't) without a real LLM call.</summary>
+public sealed class FakePromptAgent : IPromptAgent
+{
+    public PromptAgentInput? LastInput { get; private set; }
+    public int Calls { get; private set; }
+    public Func<PromptAgentInput, PromptAgentOutput>? Respond { get; set; }
+
+    public Task<PromptAgentOutput> GenerateAsync(PromptAgentInput input, CancellationToken cancellationToken = default)
+    {
+        LastInput = input;
+        Calls++;
+        return Task.FromResult(Respond?.Invoke(input) ?? new PromptAgentOutput("test action", CameraMovement.Static, null, null));
+    }
+}
 
 /// <summary>Holds one storyboard in memory; enough for ClipPlanService.</summary>
 public sealed class FakeStoryboardRepository : IStoryboardRepository
@@ -69,6 +85,14 @@ public sealed class FakeContentProjectRepository : IContentProjectRepository
         Task.FromResult<IReadOnlyList<ContentProject>>(new[] { _project });
 
     public Task AddAsync(ContentProject project, CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+    public bool DeleteWithProjectDataCalled { get; private set; }
+
+    public Task DeleteWithProjectDataAsync(Guid contentProjectId, CancellationToken cancellationToken = default)
+    {
+        DeleteWithProjectDataCalled = true;
+        return Task.CompletedTask;
+    }
 
     public Task SaveChangesAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
 }

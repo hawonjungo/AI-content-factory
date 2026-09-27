@@ -58,7 +58,11 @@ public record WizardClipDto(
     string CameraMovement,
     string? AllocationRationale,
     bool SkipGeneration,
-    bool HasExistingVideo);
+    bool HasExistingVideo,
+    /// <summary>Story character/location names this scene's narration mentioned (empty for a non-Story project, or a Story scene where nothing was recognized) - which named reference image(s) generation will actually use for this clip.</summary>
+    IReadOnlyList<string> RelevantReferenceLabels,
+    /// <summary>The latest AI clip check - only while it still describes this scene's CURRENT clip (null otherwise).</summary>
+    Generation.ClipCheckResult? ClipCheck = null);
 
 /// <param name="EstimatedForProject">Credits the current storyboard would draw if generated now.</param>
 /// <param name="WithinBudget">False when <see cref="EstimatedForProject"/> exceeds what's left today - the UI warns and blocks.</param>
@@ -88,6 +92,7 @@ public record WizardAttemptDto(
     DateTimeOffset CreatedAt);
 
 /// <summary>Step 6 status board: is there narration, are captions ready, did composition/render/validation pass.</summary>
+/// <param name="AudioMode">"Original" (keep clip audio), "Generated" (AI voice-over), or "Muted".</param>
 public record WizardCompositionStatusDto(
     string NarrationStatus,
     double NarrationSeconds,
@@ -97,6 +102,7 @@ public record WizardCompositionStatusDto(
     string CompositionStatus,
     string RenderStatus,
     string ValidationStatus,
+    string AudioMode,
     IReadOnlyList<string> ValidationErrors,
     IReadOnlyList<string> ValidationWarnings);
 

@@ -16,6 +16,22 @@ public class TikTokPublishOptions : SocialProviderOptions
     public const string SectionName = "Publishing:TikTok";
     public string ApiBaseUrl { get; set; } = "https://open.tiktokapis.com";
     public string AuthBaseUrl { get; set; } = "https://www.tiktok.com";
+
+    /// <summary>
+    /// True once TikTok has approved (audited) this app for the Content Posting
+    /// API's public scopes. An unaudited app is restricted by TikTok to
+    /// <c>privacy_level: "SELF_ONLY"</c> - posting anything else fails with
+    /// <c>unaudited_client_can_only_post_to_private_accounts</c>. Defaults to
+    /// false (safest) until the app passes TikTok's audit.
+    /// </summary>
+    public bool IsAudited { get; set; }
+
+    /// <summary>
+    /// Explicit <c>privacy_level</c> override ("PUBLIC_TO_EVERYONE",
+    /// "MUTUAL_FOLLOW_FRIENDS", "FOLLOWER_OF_CREATOR", "SELF_ONLY"). Null derives
+    /// it from <see cref="IsAudited"/> instead.
+    /// </summary>
+    public string? PrivacyLevel { get; set; }
 }
 
 /// <summary>Bound from "Publishing:YouTube". Uses a Google OAuth client (Data API v3, youtube.upload scope).</summary>

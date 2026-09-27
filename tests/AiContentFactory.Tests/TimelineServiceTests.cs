@@ -47,6 +47,22 @@ public class TimelineServiceTests
     }
 
     [Fact]
+    public void A_duration_override_drives_the_scene_length_and_the_audio_source_is_carried_through()
+    {
+        // "Keep original audio": no narration timing, the clip's own 12s length wins.
+        var scene = new TimelineSceneInput(
+            1, "/vis/1.mp4", IsStillImage: false, VoiceAbsolutePath: null,
+            NarrationTiming: AudioTiming.Empty, CaptionText: "on-screen text",
+            AudioSource: SceneAudioSource.Clip, DurationSecondsOverride: 12.0);
+
+        var timeline = Build().Build(Request(scene));
+
+        Assert.Equal(12.0, timeline.Scenes[0].DurationSeconds, 1);
+        Assert.Equal(SceneAudioSource.Clip, timeline.Scenes[0].AudioSource);
+        Assert.False(timeline.Scenes[0].HasNarration);
+    }
+
+    [Fact]
     public void A_silent_scene_gets_a_short_fixed_length_never_filler()
     {
         var timeline = Build().Build(Request(Scene(1, 6.0, false), Scene(2, 0, still: true)));

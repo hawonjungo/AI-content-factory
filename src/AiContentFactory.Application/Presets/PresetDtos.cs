@@ -33,10 +33,10 @@ public record StylePresetDto(string Id, string Name, string Description)
     public static StylePresetDto FromCatalog(StylePreset preset) => new(preset.Id, preset.Name, preset.Description);
 }
 
-public record VoicePresetDto(string Id, string Name, string Description, string Gender)
+public record VoicePresetDto(string Id, string Name, string Description, string Gender, bool IsFree = false)
 {
     public static VoicePresetDto FromCatalog(VoicePreset preset) =>
-        new(preset.Id, preset.Name, preset.Description, preset.Gender.ToString());
+        new(preset.Id, preset.Name, preset.Description, preset.Gender.ToString(), preset.IsFree);
 }
 
 public record CaptionPresetDto(string Id, string Name, string Description, CaptionSettingsDto Settings)

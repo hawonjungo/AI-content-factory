@@ -34,6 +34,38 @@ public class SocialController : ControllerBase
     public async Task<ActionResult<IReadOnlyList<SocialConnectionDto>>> GetConnections(CancellationToken cancellationToken) =>
         Ok(await _connections.GetStatusesAsync(cancellationToken));
 
+    public record PublishPrivacyOptionBody(string Value, string Label);
+    public record PublishOptionsBody(IReadOnlyList<PublishPrivacyOptionBody> PrivacyOptions, string? DefaultPrivacy, string? Notice, string? AccountLabel);
+
+    /// <summary>
+    /// The privacy/visibility choices to show for this platform right now
+    /// (TikTok: live creator_info/query result; YouTube: the fixed
+    /// public/unlisted/private set; Instagram/Facebook: none - the UI hides the
+    /// picker). Never cached - TikTok's own restrictions can change.
+    /// </summary>
+    [HttpGet("connections/{platform}/publish-options")]
+    public async Task<IActionResult> GetPublishOptions(string platform, CancellationToken cancellationToken)
+    {
+        if (!PublishTargets.TryParse(platform, out var target))
+        {
+            return Problem($"Unknown platform '{platform}'.", statusCode: StatusCodes.Status400BadRequest);
+        }
+
+        try
+        {
+            var options = await _connections.GetPublishOptionsAsync(target, cancellationToken);
+            return Ok(new PublishOptionsBody(
+                options.PrivacyOptions.Select(o => new PublishPrivacyOptionBody(o.Value, o.Label)).ToList(),
+                options.DefaultPrivacy,
+                options.Notice,
+                options.AccountLabel));
+        }
+        catch (PublishException ex)
+        {
+            return Problem(ex.Message, statusCode: StatusCodes.Status409Conflict);
+        }
+    }
+
     [HttpGet("connections/{platform}/authorize")]
     public async Task<IActionResult> Authorize(string platform, CancellationToken cancellationToken)
     {

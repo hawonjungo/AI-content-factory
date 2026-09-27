@@ -55,6 +55,13 @@ internal static class JsonAgentRunner
         {
             raw = await llmProvider.GenerateAsync(systemPrompt, userPrompt, cancellationToken);
         }
+        catch (LlmQuotaExceededException)
+        {
+            // A quota / billing spend-cap failure: retrying is pointless and
+            // would waste another billable attempt. Let it propagate so the
+            // caller can report an AI budget limit specifically.
+            throw;
+        }
         catch (Exception ex)
         {
             return (default, $"provider call failed: {ex.Message}");
@@ -63,7 +70,7 @@ internal static class JsonAgentRunner
         TOutput? parsed;
         try
         {
-            parsed = JsonSerializer.Deserialize<TOutput>(raw, JsonOptions);
+            parsed = JsonSerializer.Deserialize<TOutput>(StripJsonFence(raw), JsonOptions);
         }
         catch (JsonException ex)
         {
@@ -81,5 +88,33 @@ internal static class JsonAgentRunner
         }
 
         return (parsed, null);
+    }
+
+    /// <summary>
+    /// Models occasionally wrap the JSON in a ```json ... ``` fence despite being
+    /// told not to. Strip a single surrounding fence so a cosmetic wrapper does
+    /// not fail the whole parse. No-op for already-clean JSON.
+    /// </summary>
+    private static string StripJsonFence(string raw)
+    {
+        var text = raw.Trim();
+        if (!text.StartsWith("```", StringComparison.Ordinal))
+        {
+            return text;
+        }
+
+        var firstNewline = text.IndexOf('\n');
+        if (firstNewline < 0)
+        {
+            return text;
+        }
+
+        text = text[(firstNewline + 1)..];
+        if (text.EndsWith("```", StringComparison.Ordinal))
+        {
+            text = text[..^3];
+        }
+
+        return text.Trim();
     }
 }

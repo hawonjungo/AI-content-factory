@@ -47,6 +47,7 @@ public class GoogleFlowAssetGenerationService : IGoogleFlowAssetGenerationServic
     private readonly IStoryboardRepository _storyboardRepository;
     private readonly IAssetService _assetService;
     private readonly IHookScriptAgent _hookScriptAgent;
+    private readonly ISceneAssetGenerator _sceneGenerator;
     private readonly IImageGenerationProvider _imageProvider;
     private readonly IVideoGenerationProvider _videoProvider;
     private readonly ITtsProvider _ttsProvider;
@@ -61,6 +62,10 @@ public class GoogleFlowAssetGenerationService : IGoogleFlowAssetGenerationServic
         IStoryboardRepository storyboardRepository,
         IAssetService assetService,
         IHookScriptAgent hookScriptAgent,
+        // Shared with the standard pipeline so both paths load the same
+        // approved Character/Environment anchors + style preset once per run
+        // instead of Flow scenes generating each image with no anchor at all.
+        ISceneAssetGenerator sceneGenerator,
         // The standard image provider is already Nano Banana (gemini-2.5-flash-image),
         // so it needs no keyed override. Only the video provider differs for
         // this path: image-to-video instead of text-to-video.
@@ -79,6 +84,7 @@ public class GoogleFlowAssetGenerationService : IGoogleFlowAssetGenerationServic
         _storyboardRepository = storyboardRepository;
         _assetService = assetService;
         _hookScriptAgent = hookScriptAgent;
+        _sceneGenerator = sceneGenerator;
         _imageProvider = imageProvider;
         _videoProvider = videoProvider;
         _ttsProvider = ttsProvider;
@@ -154,9 +160,16 @@ public class GoogleFlowAssetGenerationService : IGoogleFlowAssetGenerationServic
             project.ReportProgress(Stage, 1, 4, "Đang tạo ảnh nền");
             await _projectRepository.SaveChangesAsync(cancellationToken);
 
+            // Loaded once and reused for every scene below, exactly like the
+            // standard pipeline (SceneAssetGenerator.BuildContextAsync) - same
+            // approved Character/Environment anchors and style preset for all
+            // 3 scenes, so the free Nano Banana images stay visually consistent
+            // instead of each being generated from scratch with no anchor.
+            var context = await _sceneGenerator.BuildContextAsync(project, cancellationToken);
+
             // Step 2: Generate images via Nano Banana (one per scene)
             _logger.LogInformation("Step 2: Generating {SceneCount} images via Nano Banana", flowScenes.Count);
-            var images = await GenerateImagesForScenesAsync(contentProjectId, flowScenes, sceneIds, cancellationToken);
+            var images = await GenerateImagesForScenesAsync(contentProjectId, flowScenes, sceneIds, context, cancellationToken);
 
             project.ReportProgress(Stage, 2, 4, "Đang chuyển ảnh thành video");
             await _projectRepository.SaveChangesAsync(cancellationToken);
@@ -165,12 +178,24 @@ public class GoogleFlowAssetGenerationService : IGoogleFlowAssetGenerationServic
             _logger.LogInformation("Step 3: Generating {SceneCount} videos from images", flowScenes.Count);
             await GenerateVideosFromImagesAsync(contentProjectId, flowScenes, sceneIds, images, project.AspectRatio, cancellationToken);
 
-            project.ReportProgress(Stage, 3, 4, "Đang lồng tiếng");
-            await _projectRepository.SaveChangesAsync(cancellationToken);
+            // Step 4: Generate TTS voice-over - but only when the project's audio
+            // mode actually wants a generated voice. "Keep original audio" (the
+            // default) and "Mute" use the clip's own audio, so TTS here would be
+            // wasted spend and would fight the clip's embedded voice.
+            if (project.AudioMode == AudioMode.Generated)
+            {
+                project.ReportProgress(Stage, 3, 4, "Đang lồng tiếng");
+                await _projectRepository.SaveChangesAsync(cancellationToken);
 
-            // Step 4: Generate TTS voice-over
-            _logger.LogInformation("Step 4: Generating TTS narration for {SceneCount} scenes", flowScenes.Count);
-            await GenerateVoiceForScenesAsync(contentProjectId, flowScenes, sceneIds, cancellationToken);
+                _logger.LogInformation("Step 4: Generating TTS narration for {SceneCount} scenes", flowScenes.Count);
+                await GenerateVoiceForScenesAsync(contentProjectId, flowScenes, sceneIds, cancellationToken);
+            }
+            else
+            {
+                _logger.LogInformation(
+                    "Step 4: Skipping TTS - audio mode is {AudioMode}, the clips' own audio will be used",
+                    project.AudioMode);
+            }
 
             project.TransitionToIfNeeded(ContentProjectStatus.Editing);
             project.ClearProgress();
@@ -239,9 +264,13 @@ public class GoogleFlowAssetGenerationService : IGoogleFlowAssetGenerationServic
         Guid contentProjectId,
         List<Agents.HookScriptScene> hookScenes,
         List<Guid> sceneIds,
+        SceneGenerationContext context,
         CancellationToken cancellationToken)
     {
         var images = new List<byte[]>();
+        var promptSuffix = string.IsNullOrWhiteSpace(context.Style.VisualStyleGuidance)
+            ? string.Empty
+            : $"\n\nVisual style: {context.Style.VisualStyleGuidance}.";
 
         foreach (var (hookScene, sceneId) in hookScenes.Zip(sceneIds))
         {
@@ -251,8 +280,9 @@ public class GoogleFlowAssetGenerationService : IGoogleFlowAssetGenerationServic
 
             var result = await _imageProvider.GenerateAsync(
                 new ImageGenerationRequest(
-                    Prompt: hookScene.VisualDescription,
-                    NegativePrompt: null),
+                    Prompt: hookScene.VisualDescription + promptSuffix,
+                    NegativePrompt: context.Style.NegativePrompt,
+                    ReferenceImages: context.ReferenceImages),
                 cancellationToken);
 
             // Save image
@@ -401,7 +431,7 @@ Animate this image accordingly. Focus on smooth, natural motion that enhances th
                 cancellationToken);
 
             // Track TTS cost
-            var ttsCost = _pricing.TtsUsdPer1000Chars * hookScene.Narration.Length / 1000m;
+            var ttsCost = result.IsFree ? 0m : _pricing.TtsUsdPer1000Chars * hookScene.Narration.Length / 1000m;
             await _usageTracker.RecordAsync(
                 new RecordUsageInput(
                     "gemini",

@@ -37,7 +37,15 @@ public record SceneResponse(
     string GenerationType,
     bool CharacterRequired,
     string? AudioTimingJson,
-    bool SkipGeneration)
+    bool SkipGeneration,
+    IReadOnlyList<string> RelevantReferenceLabels,
+    string KeyframeStatus,
+    Guid? KeyframeAssetId,
+    string? KeyframeImagePrompt,
+    string? MotionPrompt,
+    string ShotSize = "Unspecified",
+    bool? CharacterOnScreen = null,
+    string? ClipCheckJson = null)
 {
     /// <summary>On-screen caption text: the explicit override if set, otherwise the narration.</summary>
     public string EffectiveCaptionText => string.IsNullOrWhiteSpace(CaptionText) ? Narration : CaptionText;
@@ -69,11 +77,20 @@ public record SceneResponse(
         scene.ModelTier,
         scene.AllocationRationale,
         GenerationTypeOf(scene.VisualType),
-        // A scene features the protagonist when it is a real motion beat: any
-        // AI-video scene, or a still the allocator ranked at/above the Lite bar.
-        scene.VisualType == SceneVisualType.AiVideo || scene.AiVideoPriority >= 40,
+        // The prompt agent's decision from the shot's own visual content wins.
+        // Scenes never decided (prompted before that existed) keep the legacy
+        // heuristic: any AI-video scene, or a still ranked at/above the Lite bar.
+        scene.CharacterOnScreen ?? (scene.VisualType == SceneVisualType.AiVideo || scene.AiVideoPriority >= 40),
         scene.AudioTimingJson,
-        scene.SkipGeneration);
+        scene.SkipGeneration,
+        scene.RelevantReferenceLabels,
+        scene.KeyframeStatus.ToString(),
+        scene.KeyframeAssetId,
+        scene.KeyframeImagePrompt,
+        scene.MotionPrompt,
+        scene.ShotSize.ToString(),
+        scene.CharacterOnScreen,
+        scene.ClipCheckJson);
 }
 
 public record StoryboardResponse(
@@ -86,3 +103,18 @@ public record StoryboardResponse(
         storyboard.ContentProjectId,
         storyboard.Scenes.OrderBy(s => s.SceneNumber).Select(SceneResponse.FromDomain).ToList());
 }
+
+/// <summary>
+/// Outcome of a "suggest prompts for every unprompted scene" bulk run
+/// (<see cref="IStoryboardService.SuggestAllScenePromptsAsync"/>). Scenes that
+/// already had a prompt are counted in <see cref="AlreadyPrompted"/> and are
+/// never re-billed. A scene whose prompt-agent call failed is counted in
+/// <see cref="Failed"/> with its reason in <see cref="Errors"/>, but does not
+/// roll back scenes that already succeeded.
+/// </summary>
+public record BulkPromptSuggestionResult(
+    int Total,
+    int Succeeded,
+    int Failed,
+    int AlreadyPrompted,
+    IReadOnlyList<string> Errors);

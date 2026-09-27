@@ -2,6 +2,7 @@ using AiContentFactory.Application.Costs;
 using AiContentFactory.Application.Generation;
 using AiContentFactory.Application.Scripts;
 using AiContentFactory.Application.Storyboards;
+using AiContentFactory.Application.Stories;
 using AiContentFactory.Domain.ContentProjects;
 using AiContentFactory.Domain.Storyboards;
 using AiContentFactory.Tests.Fakes;
@@ -24,7 +25,7 @@ public class ClipPlanServiceAllocationTests
         CallToAction: "Follow for more.",
         DateTimeOffset.UtcNow);
 
-    private ClipPlanService Build(CreditStrategy strategy)
+    private ClipPlanService Build(CreditStrategy strategy, IStoryVisualContextResolver? storyVisualContextResolver = null)
     {
         var project = ContentProject.Create("t", "topic", "niche", 60, "9:16", "en");
         project.UpdateIdeaConfig(ContentIdeaConfig.Create(
@@ -35,6 +36,7 @@ public class ClipPlanServiceAllocationTests
             new FakeStoryboardRepository(Storyboard.Create(_project)),
             new FakeContentProjectRepository(project),
             new VideoAllocationPlanner(),
+            storyVisualContextResolver ?? new FakeStoryVisualContextResolver(),
             Options.Create(new CreditCostOptions())); // 50 budget, Fast 20, Lite 10
     }
 

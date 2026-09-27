@@ -24,13 +24,21 @@ public class TimelineOptions
 
 /// <param name="NarrationTiming">Actual narration timing for the scene, or <see cref="AudioTiming.Empty"/> for a silent scene.</param>
 /// <param name="CaptionText">Scene.EffectiveCaptionText - the on-screen text, distinct from the narration.</param>
+/// <param name="AudioSource">Which audio the scene segment uses (Step 6 Voice option). Defaults to the TTS voice track.</param>
+/// <param name="DurationSecondsOverride">
+/// When set, drives the scene length directly (still clamped) instead of the
+/// narration timing - used by the "keep original audio" / "mute" modes so a
+/// scene lasts exactly as long as its clip.
+/// </param>
 public record TimelineSceneInput(
     int SceneNumber,
     string VisualAbsolutePath,
     bool IsStillImage,
     string? VoiceAbsolutePath,
     AudioTiming NarrationTiming,
-    string CaptionText);
+    string CaptionText,
+    SceneAudioSource AudioSource = SceneAudioSource.Voice,
+    double? DurationSecondsOverride = null);
 
 public record TimelineBuildRequest(
     IReadOnlyList<TimelineSceneInput> Scenes,
@@ -91,9 +99,10 @@ public class TimelineService : ITimelineService
         for (var i = 0; i < request.Scenes.Count; i++)
         {
             var scene = request.Scenes[i];
-            var duration = scene.NarrationTiming.HasTiming
-                ? scene.NarrationTiming.TotalSeconds
-                : _options.NoNarrationSceneSeconds;
+            var duration = scene.DurationSecondsOverride
+                ?? (scene.NarrationTiming.HasTiming
+                    ? scene.NarrationTiming.TotalSeconds
+                    : _options.NoNarrationSceneSeconds);
             duration = Math.Clamp(duration, _options.MinSceneSeconds, _options.MaxSceneSeconds);
 
             offsets[i] = cursor;
@@ -102,9 +111,11 @@ public class TimelineService : ITimelineService
         }
 
         // One segmentation pass over the whole video keeps cue timing coherent
-        // across scene boundaries.
+        // across scene boundaries. The scene duration is passed so a scene with
+        // no narration timing (e.g. original clip audio is kept) still gets
+        // captions spread across its own length.
         var captionInputs = request.Scenes
-            .Select((s, i) => new SceneCaptionInput(s.CaptionText, s.NarrationTiming, offsets[i]))
+            .Select((s, i) => new SceneCaptionInput(s.CaptionText, s.NarrationTiming, offsets[i], durations[i]))
             .ToList();
         var allCues = request.Captions.Enabled
             ? _captionSegmentation.Segment(captionInputs, request.Captions, _captionOptions)
@@ -134,7 +145,8 @@ public class TimelineService : ITimelineService
                 durations[i],
                 input.VoiceAbsolutePath,
                 i == 0 ? TransitionKind.None : TransitionKind.Fade,
-                sceneCues));
+                sceneCues,
+                input.AudioSource));
         }
 
         var total = cursor;

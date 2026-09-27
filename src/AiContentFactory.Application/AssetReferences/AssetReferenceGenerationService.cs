@@ -1,3 +1,4 @@
+using AiContentFactory.Application.Agents;
 using AiContentFactory.Application.ContentProjects;
 using AiContentFactory.Application.Costs;
 using AiContentFactory.Application.Generation;
@@ -6,6 +7,7 @@ using AiContentFactory.Application.Providers;
 using AiContentFactory.Application.Scripts;
 using AiContentFactory.Application.Storage;
 using AiContentFactory.Domain.AssetReferences;
+using AiContentFactory.Domain.ContentProjects;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -40,6 +42,7 @@ public class AssetReferenceGenerationService : IAssetReferenceGenerationService
     private readonly IContentProjectRepository _projectRepository;
     private readonly IAssetReferenceRepository _referenceRepository;
     private readonly IImageGenerationProvider _imageProvider;
+    private readonly IAssetReferencePromptAgent _promptAgent;
     private readonly IScriptService _scriptService;
     private readonly IFileStorage _fileStorage;
     private readonly IAiUsageTracker _usageTracker;
@@ -50,6 +53,7 @@ public class AssetReferenceGenerationService : IAssetReferenceGenerationService
         IContentProjectRepository projectRepository,
         IAssetReferenceRepository referenceRepository,
         IImageGenerationProvider imageProvider,
+        IAssetReferencePromptAgent promptAgent,
         IScriptService scriptService,
         IFileStorage fileStorage,
         IAiUsageTracker usageTracker,
@@ -59,6 +63,7 @@ public class AssetReferenceGenerationService : IAssetReferenceGenerationService
         _projectRepository = projectRepository;
         _referenceRepository = referenceRepository;
         _imageProvider = imageProvider;
+        _promptAgent = promptAgent;
         _scriptService = scriptService;
         _fileStorage = fileStorage;
         _usageTracker = usageTracker;
@@ -74,7 +79,7 @@ public class AssetReferenceGenerationService : IAssetReferenceGenerationService
         var style = PresetCatalog.ResolveStyle(project.StylePresetId);
         var script = await _scriptService.GetByContentProjectIdAsync(contentProjectId, cancellationToken);
 
-        return Resolve(type, project.Title, project.Topic, project.Niche, BuildStoryContext(script), style, customPrompt: null);
+        return await ResolveAsync(type, project, BuildStoryContext(script), style, customPrompt: null, cancellationToken);
     }
 
     public async Task GenerateAsync(Guid contentProjectId, AssetReferenceType type, int count, string? customPrompt, CancellationToken cancellationToken = default)
@@ -90,7 +95,7 @@ public class AssetReferenceGenerationService : IAssetReferenceGenerationService
         var script = await _scriptService.GetByContentProjectIdAsync(contentProjectId, cancellationToken);
         var storyContext = BuildStoryContext(script);
 
-        var resolved = Resolve(type, project.Title, project.Topic, project.Niche, storyContext, style, customPrompt);
+        var resolved = await ResolveAsync(type, project, storyContext, style, customPrompt, cancellationToken);
         var prompt = resolved.Prompt;
         var negativePrompt = resolved.NegativePrompt;
 
@@ -152,50 +157,52 @@ public class AssetReferenceGenerationService : IAssetReferenceGenerationService
 
     /// <summary>
     /// Turns a type + project context into the exact prompt and negative prompt
-    /// to send. Character uses <see cref="CharacterReferencePromptBuilder"/>
-    /// (photorealistic human, anti-anthro negative); Environment keeps the
-    /// establishing-shot prompt. A non-empty <paramref name="customPrompt"/> is
-    /// sent verbatim (plus the style line), never overridden by the default.
+    /// to send. The default prompt is built by <see cref="IAssetReferencePromptAgent"/>
+    /// from the project's actual script, style preset and Step 2 story hints -
+    /// nothing about subject species or art style is hardcoded here. Only the
+    /// style preset's LOOK-ONLY reference fields (<see cref="StylePreset.ReferenceLookGuidance"/>
+    /// / <see cref="StylePreset.ReferenceNegativePrompt"/>) are used, never the
+    /// scene-oriented guidance, so a style can't fight the plain-background /
+    /// empty-plate staging. A
+    /// non-empty <paramref name="customPrompt"/> is sent verbatim (plus the
+    /// style line) and never routed through the agent - the default is never
+    /// silently substituted for what the user reviewed and edited.
     /// </summary>
-    private static SuggestedReferencePrompt Resolve(
+    private async Task<SuggestedReferencePrompt> ResolveAsync(
         AssetReferenceType type,
-        string title,
-        string? topic,
-        string? niche,
+        ContentProject project,
         string storyContext,
         StylePreset style,
-        string? customPrompt)
+        string? customPrompt,
+        CancellationToken cancellationToken)
     {
-        if (type == AssetReferenceType.Character)
+        if (!string.IsNullOrWhiteSpace(customPrompt))
         {
-            var prompt = string.IsNullOrWhiteSpace(customPrompt)
-                ? CharacterReferencePromptBuilder.BuildDefault(title, topic, niche, storyContext, style.VisualStyleGuidance)
-                : $"{customPrompt.Trim()}\n\nVisual style: {style.VisualStyleGuidance}.";
-            // The anti-anthro / anti-distortion negative is applied even to an
-            // edited prompt - it is a safety floor, not part of the wording.
-            return new SuggestedReferencePrompt(prompt, CharacterReferencePromptBuilder.MergeNegative(style.NegativePrompt));
+            var prompt = $"{customPrompt.Trim()}\n\nVisual style: {style.ReferenceLookGuidance}.";
+            // The wording is the user's, but the type-specific exclusions (no
+            // scenery for a Character sheet, no people for an Environment plate)
+            // are code-owned and always applied on top of the style's own.
+            return new SuggestedReferencePrompt(prompt, AssetReferencePromptAgent.MergeWithQualityNegative(type, style.ReferenceNegativePrompt));
         }
 
-        var environmentPrompt = string.IsNullOrWhiteSpace(customPrompt)
-            ? BuildEnvironmentPrompt(title, topic, niche, storyContext, style.VisualStyleGuidance)
-            : $"{customPrompt.Trim()}\n\nVisual style: {style.VisualStyleGuidance}.";
-        return new SuggestedReferencePrompt(environmentPrompt, style.NegativePrompt ?? string.Empty);
+        var idea = project.IdeaConfig;
+        var output = await _promptAgent.GenerateAsync(
+            new AssetReferencePromptAgentInput(
+                AssetType: type.ToString(),
+                Title: project.Title,
+                Topic: project.Topic,
+                Niche: project.Niche,
+                StoryContext: storyContext,
+                StoryType: idea.StoryType,
+                HookStyle: idea.HookStyle,
+                Emotion: idea.Emotion,
+                StyleGuidance: style.ReferenceLookGuidance,
+                StyleNegativePrompt: style.ReferenceNegativePrompt,
+                AspectRatio: project.AspectRatio),
+            cancellationToken);
+
+        return new SuggestedReferencePrompt(output.Prompt, output.NegativePrompt);
     }
-
-    private static string BuildEnvironmentPrompt(string title, string? topic, string? niche, string storyContext, string styleGuidance) => $"""
-        An establishing wide shot of the video's main location: no people,
-        no text, no logos. Clear sense of place, lighting and colour palette
-        that later shots can match. Build the location from the Story Context,
-        not from a generic living room or a portrait background.
-
-        Video title: "{title}"
-        {(string.IsNullOrWhiteSpace(topic) ? "" : $"Topic: {topic}")}
-        {(string.IsNullOrWhiteSpace(niche) ? "" : $"Niche: {niche}")}
-        Story Context (authoritative for the setting):
-        {storyContext}
-
-        Visual style: {styleGuidance}.
-        """;
 
     private static string BuildStoryContext(ScriptResponse? script)
     {

@@ -55,6 +55,22 @@ public class PricingOptions
     public decimal TtsUsdPer1000Chars { get; set; } = 0.02m;
 
     /// <summary>
+    /// One short Gemini 2.5 Flash text call (e.g. a scene prompt suggestion:
+    /// ~2k input + ~300 output tokens, plus one possible JSON-repair retry).
+    /// Rough planning figure shown next to every text-AI button.
+    /// </summary>
+    public decimal TextCallUsd { get; set; } = 0.002m;
+
+    /// <summary>One long Gemini 2.5 Flash text call (a full script or QA review: several thousand output tokens).</summary>
+    public decimal LongTextCallUsd { get; set; } = 0.01m;
+
+    /// <summary>
+    /// One AI clip check: 3 frames + up to 3 reference images (~260 tokens
+    /// each) + prompt into Gemini 2.5 Flash, a short JSON answer out.
+    /// </summary>
+    public decimal ClipCheckUsd { get; set; } = 0.003m;
+
+    /// <summary>
     /// Wall-clock wait per Veo text-to-video clip, NOT the clip's playback
     /// length. Clips are generated sequentially, so this number times the clip
     /// count is what the "time to build" estimate is dominated by. Tuned for

@@ -9,6 +9,15 @@ public interface IAssetReferenceService
 {
     Task<AssetReferenceSlotsDto> GetSlotsAsync(Guid contentProjectId, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// The FULL list of reference rows for a project - every (Type, Label)
+    /// row that exists, including legacy null-Label rows - unlike
+    /// <see cref="GetSlotsAsync"/>'s fixed Character+Environment pair. Additive
+    /// read-only capability for the Story-linked multi-named-reference flow;
+    /// does not change <see cref="GetSlotsAsync"/>'s own behavior.
+    /// </summary>
+    Task<IReadOnlyList<NamedAssetReferenceDto>> GetNamedReferencesAsync(Guid contentProjectId, CancellationToken cancellationToken = default);
+
     Task<AssetReferenceResponse> UploadAsync(Guid contentProjectId, AssetReferenceType type, string fileName, Stream content, CancellationToken cancellationToken = default);
 
     Task<AssetReferenceSlotsDto> ApproveAsync(Guid contentProjectId, Guid refId, CancellationToken cancellationToken = default);
@@ -20,7 +29,14 @@ public interface IAssetReferenceService
     /// <summary>Both Character and Environment have an Approved or Skipped row - the wizard gate.</summary>
     Task<bool> AreBothResolvedAsync(Guid contentProjectId, CancellationToken cancellationToken = default);
 
-    /// <summary>Approved reference images with bytes loaded, for the generation pipeline.</summary>
+    /// <summary>
+    /// Approved reference images with bytes loaded, for the generation
+    /// pipeline. Each <see cref="ReferenceImage.Label"/> is the row's real
+    /// <see cref="AssetReference.Label"/> when set (a Story-linked named
+    /// reference, e.g. "Milo"), or falls back to the classic
+    /// <see cref="AssetReference.Type"/> string ("Character"/"Environment")
+    /// for legacy null-Label rows - unchanged for every existing project.
+    /// </summary>
     Task<IReadOnlyList<ReferenceImage>> LoadApprovedImagesAsync(Guid contentProjectId, CancellationToken cancellationToken = default);
 }
 
@@ -43,6 +59,23 @@ public class AssetReferenceService : IAssetReferenceService
         return new AssetReferenceSlotsDto(
             BuildSlot(contentProjectId, AssetReferenceType.Character, rows),
             BuildSlot(contentProjectId, AssetReferenceType.Environment, rows));
+    }
+
+    public async Task<IReadOnlyList<NamedAssetReferenceDto>> GetNamedReferencesAsync(Guid contentProjectId, CancellationToken cancellationToken = default)
+    {
+        var rows = await _repository.GetByProjectAsync(contentProjectId, cancellationToken);
+        return rows
+            .OrderBy(r => r.Type)
+            .ThenBy(r => r.Label, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(r => r.CreatedAt)
+            .Select(r => new NamedAssetReferenceDto(
+                r.Id,
+                r.Type.ToString(),
+                r.Label,
+                r.Status.ToString(),
+                r.ImagePath is null ? null : FileUrl(contentProjectId, r.Id),
+                r.Prompt))
+            .ToList();
     }
 
     public async Task<AssetReferenceResponse> UploadAsync(Guid contentProjectId, AssetReferenceType type, string fileName, Stream content, CancellationToken cancellationToken = default)
@@ -122,7 +155,10 @@ public class AssetReferenceService : IAssetReferenceService
             using var memory = new MemoryStream();
             await stream.CopyToAsync(memory, cancellationToken);
             var mime = row.ImagePath!.EndsWith(".png", StringComparison.OrdinalIgnoreCase) ? "image/png" : "image/jpeg";
-            images.Add(new ReferenceImage(memory.ToArray(), mime, row.Type.ToString(), row.Prompt));
+            // Real Label when this row has one (a Story-linked named
+            // reference); otherwise fall back to the classic Type string -
+            // exactly the label every legacy row produced before Label existed.
+            images.Add(new ReferenceImage(memory.ToArray(), mime, row.Label ?? row.Type.ToString(), row.Prompt));
         }
 
         return images;

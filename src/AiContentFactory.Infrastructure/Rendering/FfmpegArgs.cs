@@ -13,17 +13,47 @@ internal static class FfmpegArgs
     internal const double FadeSeconds = 0.25;
 
     /// <summary>
-    /// One scene segment: input 0 is the visual, input 1 is the narration audio
-    /// (or generated silence). The maps are explicit - <c>-map 0:v:0 -map 1:a:0</c>
-    /// - so a video clip's own audio track can never be picked over the voice-over.
+    /// dynaudnorm keeps the kept-original-audio clips and the TTS voice-over at a
+    /// consistent perceived level, so the audio never "jumps" at a video→image
+    /// transition. apad then fills the segment to its full timeline length so
+    /// there is no silent gap where one clip's audio ends before the cut. Both
+    /// only apply to real audio - normalising pure silence would raise its noise
+    /// floor.
+    /// </summary>
+    internal const string LevelledAudioFilter = "aresample=24000,dynaudnorm=f=200:g=15:p=0.9:m=8,apad";
+
+    /// <summary>
+    /// One scene segment. Input 0 is always the visual. The audio map depends on
+    /// the Step 6 Voice option (<see cref="RenderScene.AudioSource"/>):
+    /// <list type="bullet">
+    /// <item><c>Voice</c> - input 1 is the narration track (or generated silence);
+    /// mapped <c>-map 1:a:0</c> so a clip's own audio can't be picked over the voice-over.</item>
+    /// <item><c>Clip</c> - the clip's own embedded audio is kept: <c>-map 0:a:0</c>, no extra input.</item>
+    /// <item><c>Silent</c> - input 1 is generated silence; <c>-map 1:a:0</c>.</item>
+    /// </list>
+    /// Every branch produces exactly <c>duration</c> seconds of aac/24000/mono
+    /// audio, so the concat demuxer copies the segments into one continuous,
+    /// level-matched audio timeline.
     /// </summary>
     internal static string SegmentArgs(RenderScene scene, string outputPath, int width, int height, int fps)
     {
         var duration = scene.DurationSeconds.ToString("F2", CultureInfo.InvariantCulture);
 
-        var audioInput = scene.VoiceAbsolutePath is not null
-            ? $"-i \"{scene.VoiceAbsolutePath}\""
-            : $"-f lavfi -t {duration} -i anullsrc=channel_layout=mono:sample_rate=24000";
+        // A still image never has usable audio, so "keep clip audio" degrades to silence there.
+        var audioSource = scene.AudioSource == SceneAudioSource.Clip && scene.IsStillImage
+            ? SceneAudioSource.Silent
+            : scene.AudioSource;
+
+        var silenceInput = $"-f lavfi -t {duration} -i anullsrc=channel_layout=mono:sample_rate=24000";
+
+        var (audioInput, audioMap, audioFilter) = audioSource switch
+        {
+            SceneAudioSource.Clip => (string.Empty, "-map 0:a:0", LevelledAudioFilter),
+            SceneAudioSource.Silent => (silenceInput, "-map 1:a:0", string.Empty),
+            _ => scene.VoiceAbsolutePath is not null
+                ? ($"-i \"{scene.VoiceAbsolutePath}\"", "-map 1:a:0", LevelledAudioFilter)
+                : (silenceInput, "-map 1:a:0", string.Empty),
+        };
 
         string visualInput;
         string filter;
@@ -45,9 +75,16 @@ internal static class FfmpegArgs
             filter += $",fade=t=in:st=0:d={FadeSeconds.ToString("0.##", CultureInfo.InvariantCulture)}";
         }
 
+        var inputs = string.IsNullOrEmpty(audioInput) ? visualInput : $"{visualInput} {audioInput}";
+        var afArg = string.IsNullOrEmpty(audioFilter) ? string.Empty : $"-af \"{audioFilter}\" ";
+
+        // -t is the single authority for the segment length (video is looped,
+        // audio is apad-padded), so -shortest is intentionally not used - it
+        // would let a voice track shorter than the scene cut the segment early
+        // and drift every later scene and caption.
         return
-            $"-y -loglevel error {visualInput} {audioInput} -map 0:v:0 -map 1:a:0 -t {duration} -r {fps} -vf \"{filter}\" " +
-            $"-c:v libx264 -pix_fmt yuv420p -c:a aac -ar 24000 -ac 1 -shortest \"{outputPath}\"";
+            $"-y -loglevel error {inputs} -map 0:v:0 {audioMap} -t {duration} -r {fps} -vf \"{filter}\" {afArg}" +
+            $"-c:v libx264 -pix_fmt yuv420p -c:a aac -ar 24000 -ac 1 \"{outputPath}\"";
     }
 
     /// <summary>

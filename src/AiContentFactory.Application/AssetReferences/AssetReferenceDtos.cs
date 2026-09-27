@@ -16,6 +16,27 @@ public record AssetReferenceSlotDto(
 
 public record AssetReferenceSlotsDto(AssetReferenceSlotDto Character, AssetReferenceSlotDto Environment);
 
+/// <summary>
+/// One row of a project's FULL reference list, unlike <see cref="AssetReferenceSlotsDto"/>'s
+/// fixed Character+Environment pair - includes every (Type, Label) row that
+/// exists, including legacy rows with a null <see cref="Label"/>. Read-only;
+/// used by the Story-linked multi-named-reference flow (see
+/// <see cref="IAssetReferenceService.GetNamedReferencesAsync"/>).
+/// </summary>
+/// <param name="Label">
+/// Which named character/location this row is for (e.g. "Milo", "Ha Long
+/// Bay"), or null for the classic single-slot case.
+/// </param>
+/// <param name="Status">"Pending" | "Generated" | "Approved" | "Skipped".</param>
+/// <param name="ImageUrl">API-relative path to the image, or null when there isn't one yet.</param>
+public record NamedAssetReferenceDto(
+    Guid Id,
+    string Type,
+    string? Label,
+    string Status,
+    string? ImageUrl,
+    string? Prompt);
+
 public record AssetReferenceResponse(Guid Id, string Type, string Status, string? ImageUrl, string? Prompt, DateTimeOffset CreatedAt)
 {
     public static AssetReferenceResponse FromDomain(AssetReference reference, Func<Guid, string?> fileUrl) => new(

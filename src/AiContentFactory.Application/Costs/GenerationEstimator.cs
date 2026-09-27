@@ -78,6 +78,7 @@ public class GenerationEstimator : IGenerationEstimator
     private readonly BudgetOptions _budget;
     private readonly GoogleFlowOptions _flow;
     private readonly ILogger<GenerationEstimator> _logger;
+    private readonly ContentProjects.IContentProjectRepository? _projectRepository;
 
     public GenerationEstimator(
         IStoryboardService storyboardService,
@@ -87,8 +88,10 @@ public class GenerationEstimator : IGenerationEstimator
         IOptions<PricingOptions> pricing,
         IOptions<BudgetOptions> budget,
         IOptions<GoogleFlowOptions> flow,
-        ILogger<GenerationEstimator> logger)
+        ILogger<GenerationEstimator> logger,
+        ContentProjects.IContentProjectRepository? projectRepository = null)
     {
+        _projectRepository = projectRepository;
         _storyboardService = storyboardService;
         _assetService = assetService;
         _usageTracker = usageTracker;
@@ -97,6 +100,18 @@ public class GenerationEstimator : IGenerationEstimator
         _budget = budget.Value;
         _flow = flow.Value;
         _logger = logger;
+    }
+
+    /// <summary>True when the project's resolved voice is a free self-hosted one (same resolution as the real run).</summary>
+    private async Task<bool> UsesFreeVoiceAsync(Guid contentProjectId, CancellationToken cancellationToken)
+    {
+        if (_projectRepository is null)
+        {
+            return false;
+        }
+
+        var project = await _projectRepository.GetByIdAsync(contentProjectId, cancellationToken);
+        return project is not null && Presets.PresetCatalog.ResolveVoice(project.VoicePresetId, project.IdeaConfig.VoiceGender).IsFree;
     }
 
     // Google Flow always writes this shape - see HookScriptAgent.
@@ -155,10 +170,13 @@ public class GenerationEstimator : IGenerationEstimator
         if (pendingVoice.Count > 0)
         {
             var characters = pendingVoice.Sum(s => s.Narration.Length);
+            // Same rule the real run records (SceneAssetGenerator.GenerateVoiceAsync):
+            // Gemini voices at the configured rate, a free Kokoro voice at $0.
+            var freeVoice = await UsesFreeVoiceAsync(contentProjectId, cancellationToken);
             lineItems.Add(new EstimateLineItem(
-                "Lồng tiếng (TTS)",
+                freeVoice ? "Lồng tiếng (giọng 🆓 Kokoro)" : "Lồng tiếng AI (Gemini)",
                 pendingVoice.Count,
-                0m, // Gemini free tier covers modest TTS
+                freeVoice ? 0m : _pricing.TtsUsdPer1000Chars * characters / 1000m,
                 _pricing.SecondsPerVoiceClip * pendingVoice.Count,
                 0));
         }
@@ -202,7 +220,8 @@ public class GenerationEstimator : IGenerationEstimator
                 _pricing.VideoUsdPerSecond * outputSeconds,
                 _pricing.GoogleFlowSecondsPerClip * clipCount,
                 _flow.CreditsPerVideoClip * clipCount),
-            new("Lồng tiếng (TTS)", clipCount, 0m, _pricing.SecondsPerVoiceClip * clipCount, 0),
+            // This mode always voices with Gemini (GoogleFlowAssetGenerationService), billed per character.
+            new("Lồng tiếng (Gemini TTS)", clipCount, _pricing.TtsUsdPer1000Chars * GoogleFlowNarrationCharsPerClip * clipCount / 1000m, _pricing.SecondsPerVoiceClip * clipCount, 0),
             new("Ghép và xuất video", 1, 0m, _pricing.RenderSecondsPerClip * clipCount, 0)
         };
 
@@ -235,10 +254,11 @@ public class GenerationEstimator : IGenerationEstimator
 
         if (includeVoice && !string.IsNullOrWhiteSpace(scene.Narration))
         {
+            var freeVoice = await UsesFreeVoiceAsync(contentProjectId, cancellationToken);
             lineItems.Add(new EstimateLineItem(
-                "Lồng tiếng lại",
+                freeVoice ? "Lồng tiếng lại (giọng 🆓 Kokoro)" : "Lồng tiếng lại (Gemini)",
                 1,
-                0m,
+                freeVoice ? 0m : _pricing.TtsUsdPer1000Chars * scene.Narration.Length / 1000m,
                 _pricing.SecondsPerVoiceClip,
                 0));
         }

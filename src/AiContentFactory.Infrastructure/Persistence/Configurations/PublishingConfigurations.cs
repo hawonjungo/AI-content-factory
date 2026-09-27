@@ -43,6 +43,7 @@ public class PublishJobConfiguration : IEntityTypeConfiguration<PublishJob>
         builder.Property(j => j.PublishedUrl).HasMaxLength(1000);
         builder.Property(j => j.ErrorMessage).HasColumnType("text");
         builder.Property(j => j.IdempotencyKey).HasMaxLength(200).IsRequired();
+        builder.Property(j => j.Privacy).HasMaxLength(50);
 
         builder.HasIndex(j => j.ContentProjectId);
         builder.HasIndex(j => new { j.ContentProjectId, j.Platform });

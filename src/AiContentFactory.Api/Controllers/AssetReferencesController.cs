@@ -59,6 +59,17 @@ public class AssetReferencesController : ControllerBase
         Ok(await _service.GetSlotsAsync(contentProjectId, cancellationToken));
 
     /// <summary>
+    /// The FULL list of named reference rows for a project (every (Type,
+    /// Label) row, including legacy null-Label ones) - unlike <see cref="GetSlots"/>'s
+    /// fixed Character+Environment pair. Used by the Story-linked
+    /// multi-named-reference flow; purely additive, does not affect
+    /// <see cref="GetSlots"/>.
+    /// </summary>
+    [HttpGet("named")]
+    public async Task<ActionResult<IReadOnlyList<NamedAssetReferenceDto>>> GetNamedReferences(Guid contentProjectId, CancellationToken cancellationToken) =>
+        Ok(await _service.GetNamedReferencesAsync(contentProjectId, cancellationToken));
+
+    /// <summary>
     /// The default prompt this project would use for a reference type, for the
     /// human-in-the-loop review/edit before generation. The client sends the
     /// (possibly edited) prompt back to <c>POST generate</c>.

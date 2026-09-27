@@ -25,6 +25,15 @@ public interface IPublishingService
 
     Task<PublishJobDto> RetryAsync(Guid contentProjectId, Guid publishJobId, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Deletes finished-but-unsuccessful history clutter (Failed/Cancelled jobs)
+    /// for this project. A job that actually published successfully - and
+    /// therefore may carry a published link - is never touched, and neither is
+    /// a job still in flight (Pending/Scheduled/Publishing). Returns the jobs
+    /// that remain, so the caller can update its view without a second fetch.
+    /// </summary>
+    Task<IReadOnlyList<PublishJobDto>> ClearHistoryAsync(Guid contentProjectId, CancellationToken cancellationToken = default);
+
     /// <summary>Runs one publish job against its platform. Called by the background worker; idempotent for an already-published job.</summary>
     Task RunJobAsync(Guid publishJobId, CancellationToken cancellationToken = default);
 }
@@ -176,7 +185,8 @@ public class PublishingService : IPublishingService
                 request.Title,
                 request.Caption,
                 request.Hashtags,
-                scheduledAtUtc);
+                scheduledAtUtc,
+                request.PlatformPrivacy?.GetValueOrDefault(platform));
 
             await _jobs.AddAsync(job, cancellationToken);
             created.Add(PublishJobDto.FromDomain(job));
@@ -245,6 +255,32 @@ public class PublishingService : IPublishingService
         return PublishJobDto.FromDomain(job);
     }
 
+    public async Task<IReadOnlyList<PublishJobDto>> ClearHistoryAsync(Guid contentProjectId, CancellationToken cancellationToken = default)
+    {
+        var jobs = await _jobs.GetByProjectAsync(contentProjectId, cancellationToken);
+
+        // "History" = a finished attempt that isn't a successful publish. Published
+        // jobs (and therefore any published link) are never deletable here, and a
+        // job still in flight isn't history yet.
+        var removable = jobs.Where(j => j.Status is PublishJobStatus.Failed or PublishJobStatus.Cancelled).ToList();
+
+        if (removable.Count > 0)
+        {
+            await _jobs.RemoveRangeAsync(removable, cancellationToken);
+            await _jobs.SaveChangesAsync(cancellationToken);
+            _logger.LogInformation(
+                "Cleared {Count} publish history record(s) for ContentProject {ContentProjectId}",
+                removable.Count, contentProjectId);
+        }
+
+        var removableIds = removable.Select(j => j.Id).ToHashSet();
+        return jobs
+            .Where(j => !removableIds.Contains(j.Id))
+            .OrderByDescending(j => j.CreatedAt)
+            .Select(PublishJobDto.FromDomain)
+            .ToList();
+    }
+
     public async Task RunJobAsync(Guid publishJobId, CancellationToken cancellationToken = default)
     {
         var job = await _jobs.GetByIdAsync(publishJobId, cancellationToken);
@@ -302,7 +338,8 @@ public class PublishingService : IPublishingService
                     PublicUrl: publicUrl),
                 token.AccessToken,
                 token.AccountId,
-                job.ScheduledAtUtc),
+                job.ScheduledAtUtc,
+                job.Privacy),
                 cancellationToken);
 
             job.MarkPublished(result.ExternalId, result.Url);

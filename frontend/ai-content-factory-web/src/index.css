@@ -74,23 +74,21 @@ h2 {
   color: var(--text-h);
 }
 
+/*
+ * Matches the .wz-scoped h1/h2 in wizard.css - the wizard/list pages already
+ * override these via .wz, but AdvancedProjectPage (the one page not wrapped
+ * in .wz) was inheriting the old, much larger Vite-template defaults here
+ * instead. Kept as one shared scale rather than two.
+ */
 h1 {
-  font-size: 56px;
-  letter-spacing: -1.68px;
-  margin: 32px 0;
-  @media (max-width: 1024px) {
-    font-size: 36px;
-    margin: 20px 0;
-  }
+  font-size: 26px;
+  letter-spacing: -0.4px;
+  margin: 0 0 4px;
 }
 h2 {
-  font-size: 24px;
+  font-size: 19px;
   line-height: 118%;
-  letter-spacing: -0.24px;
-  margin: 0 0 8px;
-  @media (max-width: 1024px) {
-    font-size: 20px;
-  }
+  margin: 0 0 6px;
 }
 p {
   margin: 0;

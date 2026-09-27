@@ -25,12 +25,12 @@ public interface IHookScriptAgent
 
 public class HookScriptAgent : IHookScriptAgent
 {
-    private readonly ILlmProvider _llmProvider;
+    private readonly ILlmRouter _router;
     private readonly ILogger<HookScriptAgent> _logger;
 
-    public HookScriptAgent(ILlmProvider llmProvider, ILogger<HookScriptAgent> logger)
+    public HookScriptAgent(ILlmRouter router, ILogger<HookScriptAgent> logger)
     {
-        _llmProvider = llmProvider;
+        _router = router;
         _logger = logger;
     }
 
@@ -99,7 +99,7 @@ Target Audience: {{audience}}
 
         try
         {
-            var result = await _llmProvider.GenerateAsync(systemPrompt, userPrompt, cancellationToken);
+            var result = await _router.Resolve(LlmTaskType.HookTitle).GenerateAsync(systemPrompt, userPrompt, cancellationToken);
             var jsonContent = ExtractJson(result);
 
             // The JSON keys are camelCase but the record members are PascalCase -

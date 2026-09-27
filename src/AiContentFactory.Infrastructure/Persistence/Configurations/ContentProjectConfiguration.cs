@@ -35,6 +35,15 @@ public class ContentProjectConfiguration : IEntityTypeConfiguration<ContentProje
             .IsRequired()
             .HasMaxLength(10);
 
+        // Stored as text like Status. EF always writes the value explicitly, so
+        // new projects persist their CLR default (Original); the migration
+        // backfills existing rows to Generated so their render output is
+        // unchanged.
+        builder.Property(p => p.AudioMode)
+            .HasConversion<string>()
+            .HasMaxLength(15)
+            .IsRequired();
+
         // Preset ids reference the code-defined catalog (Application/Presets),
         // so there is no FK to enforce and no seed table to keep in sync.
         builder.Property(p => p.TemplateId).HasMaxLength(60);

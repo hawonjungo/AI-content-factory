@@ -49,11 +49,11 @@ public class ScriptAgent : IScriptAgent
         {"hook": string, "introduction": string, "body": string, "escalation": string, "payoff": string, "callToAction": string}
         """;
 
-    private readonly ILlmProvider _llmProvider;
+    private readonly ILlmRouter _router;
 
-    public ScriptAgent(ILlmProvider llmProvider)
+    public ScriptAgent(ILlmRouter router)
     {
-        _llmProvider = llmProvider;
+        _router = router;
     }
 
     public Task<ScriptAgentOutput> GenerateAsync(ScriptAgentInput input, CancellationToken cancellationToken = default)
@@ -81,7 +81,7 @@ public class ScriptAgent : IScriptAgent
             """;
 
         return JsonAgentRunner.RunAsync<ScriptAgentOutput>(
-            _llmProvider,
+            _router.Resolve(LlmTaskType.Script),
             SystemPrompt,
             userPrompt,
             validate: output => !string.IsNullOrWhiteSpace(output.Hook) && !string.IsNullOrWhiteSpace(output.Body),

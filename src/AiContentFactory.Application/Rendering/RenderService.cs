@@ -2,6 +2,7 @@ using AiContentFactory.Application.AssetReferences;
 using AiContentFactory.Application.Assets;
 using AiContentFactory.Application.Audio;
 using AiContentFactory.Application.ContentProjects;
+using AiContentFactory.Application.Generation;
 using AiContentFactory.Application.Storage;
 using AiContentFactory.Application.Storyboards;
 using AiContentFactory.Domain.AssetReferences;
@@ -39,7 +40,10 @@ public interface IRenderService
 /// captions but no narrator audio can never be marked ready.
 ///
 /// Re-runnable independently of asset generation - re-rendering after changing
-/// the caption preset or the music reuses the same clips and costs nothing.
+/// the caption preset or the music reuses the same clips and costs nothing. In
+/// Smart audio mode the first render may synthesize a per-clip TTS voice-over
+/// for clips that have narration but no original audio; that voice asset is
+/// persisted, so subsequent renders reuse it for free.
 /// </summary>
 public class RenderService : IRenderService
 {
@@ -53,6 +57,8 @@ public class RenderService : IRenderService
     private readonly IVideoRenderer _renderer;
     private readonly IAudioValidator _audioValidator;
     private readonly IAudioTimingService _audioTiming;
+    private readonly IMediaProbe _mediaProbe;
+    private readonly ISceneAssetGenerator _sceneGenerator;
     private readonly ITimelineService _timelineService;
     private readonly IVideoCompositionService _composition;
     private readonly ILogger<RenderService> _logger;
@@ -66,6 +72,8 @@ public class RenderService : IRenderService
         IVideoRenderer renderer,
         IAudioValidator audioValidator,
         IAudioTimingService audioTiming,
+        IMediaProbe mediaProbe,
+        ISceneAssetGenerator sceneGenerator,
         ITimelineService timelineService,
         IVideoCompositionService composition,
         ILogger<RenderService> logger)
@@ -78,6 +86,8 @@ public class RenderService : IRenderService
         _renderer = renderer;
         _audioValidator = audioValidator;
         _audioTiming = audioTiming;
+        _mediaProbe = mediaProbe;
+        _sceneGenerator = sceneGenerator;
         _timelineService = timelineService;
         _composition = composition;
         _logger = logger;
@@ -103,8 +113,18 @@ public class RenderService : IRenderService
                 throw new InvalidOperationException("No scenes to render - generate the clip plan and clips first.");
             }
 
+            // Step 6 Voice option, resolved PER CLIP by SceneAudioResolver:
+            //  - Generated: TTS voice bed for every narrated scene (unchanged).
+            //  - Smart (default): keep a clip's own audio where it has an audio
+            //    stream; TTS only for the clips that lack one but have narration.
+            //  - Muted: no audio at all.
+            var audioMode = project.AudioMode;
+
             var timelineInputs = new List<TimelineSceneInput>();
             var audioProblems = new List<string>();
+
+            // Built once, only if some clip actually needs a TTS track generated now.
+            AiContentFactory.Application.Generation.SceneGenerationContext? voiceContext = null;
 
             foreach (var scene in orderedScenes)
             {
@@ -118,21 +138,77 @@ public class RenderService : IRenderService
                     throw new InvalidOperationException($"Scene {scene.SceneNumber} has no ready clip - generate the clips first.");
                 }
 
-                var voice = CurrentAsset(assets, scene.Id, AssetType.Voice);
-                var timing = await ResolveNarrationTimingAsync(scene, voice, audioProblems, cancellationToken);
+                var visualAbsolutePath = _fileStorage.GetAbsolutePath(visual.FilePath);
+                var hasNarration = !string.IsNullOrWhiteSpace(scene.Narration);
+
+                // Generated mode never inspects the clip; every other mode needs
+                // to know whether a video clip carries an audio stream (an image
+                // never does) and how long it runs.
+                var probe = audioMode != AudioMode.Generated && !isStill
+                    ? await ProbeQuietlyAsync(visualAbsolutePath, cancellationToken)
+                    : null;
+                var clipSeconds = probe is { Ok: true, DurationSeconds: > 0 }
+                    ? probe.DurationSeconds
+                    : visual.DurationSeconds is > 0 ? visual.DurationSeconds : (double?)null;
+                var clipHasAudio = probe is { Ok: true, HasAudio: true };
+
+                var decision = SceneAudioResolver.Resolve(audioMode, isStill, clipHasAudio, hasNarration);
+
+                string? voiceAbsolutePath = null;
+                var timing = Audio.AudioTiming.Empty;
+
+                if (decision.NeedsTts)
+                {
+                    var voice = CurrentAsset(assets, scene.Id, AssetType.Voice);
+
+                    // A narrated scene with no current TTS track gets one now -
+                    // per clip, through the same pipeline as a normal run, and
+                    // persisted so later renders reuse it. This covers Smart /
+                    // Original (which never pre-generate) AND a voice-settings
+                    // change in any mode (which supersedes the old tracks so
+                    // they are regenerated here with the new voice).
+                    if (voice?.FilePath is null && hasNarration)
+                    {
+                        voiceContext ??= await _sceneGenerator.BuildContextAsync(project, cancellationToken);
+                        _logger.LogInformation(
+                            "Audio: scene {SceneNumber} needs a voice-over ({AudioMode}) - synthesizing it now",
+                            scene.SceneNumber, audioMode);
+                        await _sceneGenerator.GenerateVoiceAsync(voiceContext, scene, cancellationToken);
+                        assets = await _assetService.GetByContentProjectIdAsync(contentProjectId, cancellationToken);
+                        voice = CurrentAsset(assets, scene.Id, AssetType.Voice);
+                    }
+
+                    timing = await ResolveNarrationTimingAsync(scene, voice, audioProblems, cancellationToken);
+                    voiceAbsolutePath = voice?.FilePath is null ? null : _fileStorage.GetAbsolutePath(voice.FilePath);
+                }
+
+                // Scene length authority, in priority order:
+                //  - a Clip / Muted-video scene lasts as long as its own clip;
+                //  - a silent scene that still has a script (a muted image, say)
+                //    is held for as long as that narration WOULD take to read, so
+                //    its subtitles stay on screen and its timeline matches the
+                //    other audio modes - it is just silent;
+                //  - otherwise the narration timing / default drives it.
+                var durationOverride = decision.UseClipDuration
+                    ? clipSeconds
+                    : decision.Source == SceneAudioSource.Silent && hasNarration
+                        ? EstimateNarrationSeconds(scene.Narration)
+                        : (double?)null;
 
                 timelineInputs.Add(new TimelineSceneInput(
                     SceneNumber: scene.SceneNumber,
-                    VisualAbsolutePath: _fileStorage.GetAbsolutePath(visual.FilePath),
+                    VisualAbsolutePath: visualAbsolutePath,
                     IsStillImage: isStill,
-                    VoiceAbsolutePath: voice?.FilePath is null ? null : _fileStorage.GetAbsolutePath(voice.FilePath),
+                    VoiceAbsolutePath: voiceAbsolutePath,
                     NarrationTiming: timing,
-                    CaptionText: string.IsNullOrWhiteSpace(scene.CaptionText) ? scene.Narration : scene.CaptionText!));
+                    CaptionText: string.IsNullOrWhiteSpace(scene.CaptionText) ? scene.Narration : scene.CaptionText!,
+                    AudioSource: decision.Source,
+                    DurationSecondsOverride: durationOverride));
             }
 
-            // Audio-first gate: a scene that is supposed to be narrated but has
-            // no usable voice track fails the whole render - we never ship a
-            // captions-only video.
+            // Audio-first gate: a scene that needs narration but has no usable
+            // voice track fails the whole render - we never ship a captions-only
+            // video. In Smart/Generated this covers the clips that require TTS.
             if (audioProblems.Count > 0)
             {
                 throw new InvalidOperationException(
@@ -159,7 +235,12 @@ public class RenderService : IRenderService
                 OutputAbsolutePath: outputAbsolutePath,
                 BackgroundMusicAbsolutePath: music?.FilePath is null ? null : _fileStorage.GetAbsolutePath(music.FilePath),
                 StoryboardSceneCount: orderedScenes.Count,
-                ScenesWithVisual: timelineInputs.Count),
+                ScenesWithVisual: timelineInputs.Count,
+                // Only "Generate new voice" hard-requires a TTS bed for the whole
+                // video. Smart legitimately mixes clip audio + TTS + silence, and
+                // Mute has none - the "output has an audio stream" check still guards
+                // a totally broken result.
+                RequireNarration: audioMode == AudioMode.Generated),
                 cancellationToken);
 
             // Only one final video is current at a time.
@@ -206,6 +287,32 @@ public class RenderService : IRenderService
             }
 
             throw;
+        }
+    }
+
+    /// <summary>
+    /// Rough spoken length of a narration line (~2.5 words/sec, the rate the
+    /// script agent and the timeline target). Used to hold a silent scene that
+    /// still carries a script - e.g. a muted image - long enough to read its
+    /// captions, instead of collapsing it to the no-narration default.
+    /// </summary>
+    private static double EstimateNarrationSeconds(string narration)
+    {
+        var words = narration.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).Length;
+        return Math.Clamp(words / 2.5, 2.0, 22.0);
+    }
+
+    /// <summary>Probes a media file, swallowing any failure - the caller falls back to the stored asset duration.</summary>
+    private async Task<MediaInfo?> ProbeQuietlyAsync(string absolutePath, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await _mediaProbe.ProbeAsync(absolutePath, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Could not probe clip {Path} for audio-mode rendering", absolutePath);
+            return null;
         }
     }
 

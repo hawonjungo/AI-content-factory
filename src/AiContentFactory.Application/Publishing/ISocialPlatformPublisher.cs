@@ -25,7 +25,44 @@ public record PublishUploadRequest(
     string AccessToken,
     string? ExternalAccountId,
     /// <summary>When set, ask the platform to schedule the post for this UTC time instead of publishing immediately (YouTube supports this natively).</summary>
-    DateTimeOffset? PublishAtUtc);
+    DateTimeOffset? PublishAtUtc,
+    /// <summary>
+    /// The platform-specific privacy/visibility value the user picked for this
+    /// job (e.g. TikTok's "SELF_ONLY", YouTube's "unlisted") - one of the
+    /// <see cref="PublishPrivacyOption.Value"/>s <see cref="ISocialPlatformPublisher.GetPublishOptionsAsync"/>
+    /// returned for this platform. Null means "use the platform's own default".
+    /// A publisher must never fall back to a value the platform didn't actually offer.
+    /// </summary>
+    string? Privacy = null);
+
+/// <param name="Value">The raw value to send back as <see cref="PublishUploadRequest.Privacy"/> (platform-specific, e.g. TikTok's "SELF_ONLY").</param>
+/// <param name="Label">Human-readable label for the UI.</param>
+public record PublishPrivacyOption(string Value, string Label);
+
+/// <summary>
+/// The privacy/visibility choices a platform actually supports for the
+/// connected account right now, plus any restriction the UI should explain
+/// before the user tries (and fails) to publish. Every platform builds its own
+/// - there is no shared privacy enum across platforms.
+/// </summary>
+public record PlatformPublishOptions(
+    IReadOnlyList<PublishPrivacyOption> PrivacyOptions,
+    string? DefaultPrivacy,
+    /// <summary>User-facing explanation shown next to the picker when the platform is currently restricted (e.g. TikTok unaudited apps).</summary>
+    string? Notice,
+    /// <summary>
+    /// The connected account's own display name/handle, straight from the
+    /// platform's live API (e.g. TikTok's creator_info "@username") - lets the
+    /// user confirm they're about to publish to the account they think they
+    /// are, since the OAuth account id alone isn't always recognisable. Null
+    /// when the platform has nothing extra to show beyond the connection's own
+    /// account name.
+    /// </summary>
+    string? AccountLabel = null)
+{
+    /// <summary>No privacy/visibility choice for this platform - the UI shows nothing extra.</summary>
+    public static PlatformPublishOptions None { get; } = new(Array.Empty<PublishPrivacyOption>(), null, null);
+}
 
 public record PublishResult(string ExternalId, string? Url);
 
@@ -79,6 +116,26 @@ public interface ISocialPlatformPublisher
 
     /// <summary>False when the platform's client key/secret are not configured - the UI shows "configure credentials" and no job is created.</summary>
     bool IsConfigured { get; }
+
+    /// <summary>
+    /// OAuth scope UploadAsync needs to succeed (e.g. YouTube's
+    /// "https://www.googleapis.com/auth/youtube.upload"), checked against the
+    /// granted <see cref="OAuthTokens.Scope"/> before a token is handed to the
+    /// publisher. Null when the platform doesn't need this check.
+    /// </summary>
+    string? RequiredScope => null;
+
+    /// <summary>
+    /// The privacy/visibility choices to offer in the Step 7 UI for this
+    /// platform right now, using the connected account's live access token.
+    /// TikTok calls creator_info/query so the options (and any unaudited-app
+    /// restriction) always reflect what TikTok will actually allow; platforms
+    /// with a fixed set (YouTube) can return a static list; platforms with no
+    /// supported privacy setting (Instagram, Facebook) return
+    /// <see cref="PlatformPublishOptions.None"/> so the UI shows nothing extra.
+    /// </summary>
+    Task<PlatformPublishOptions> GetPublishOptionsAsync(string accessToken, CancellationToken cancellationToken = default) =>
+        Task.FromResult(PlatformPublishOptions.None);
 
     string GetAuthorizationUrl(string redirectUri, string state);
 

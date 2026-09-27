@@ -9,6 +9,10 @@ namespace AiContentFactory.Application.Rendering;
 /// </param>
 /// <param name="Motion">Camera move for an image scene; ignored for a video clip.</param>
 /// <param name="TransitionIn">Applied at the start of the segment (fade in) so scenes don't hard-cut.</param>
+/// <param name="AudioSource">
+/// Which audio the segment carries: the mapped voice track (default), the clip's
+/// own embedded audio, or forced silence. Set by the Step 6 Voice option.
+/// </param>
 public record RenderScene(
     string VisualAbsolutePath,
     string? VoiceAbsolutePath,
@@ -16,7 +20,8 @@ public record RenderScene(
     string Narration,
     bool IsStillImage = false,
     SceneMotion Motion = SceneMotion.None,
-    TransitionKind TransitionIn = TransitionKind.None);
+    TransitionKind TransitionIn = TransitionKind.None,
+    SceneAudioSource AudioSource = SceneAudioSource.Voice);
 
 /// <param name="Captions">
 /// Full caption styling from the project's caption preset (plus any manual

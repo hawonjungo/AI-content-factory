@@ -120,6 +120,7 @@ public class Phase7VideoCompositionTests
             creditLedger: null!,
             fileStorage: null!,
             usageTracker: null!,
+            storyVisualContextResolver: null!,
             pricing: Options.Create(new PricingOptions()),
             creditCosts: Options.Create(new CreditCostOptions()),
             flow: Options.Create(new GoogleFlowOptions()),
@@ -129,12 +130,56 @@ public class Phase7VideoCompositionTests
         var sb = Storyboard.Create(_project);
         var scene = sb.AddScene(8, "n", "shot", "push", SceneVisualType.AiVideo);
         scene.SetSkipGeneration(true);
-        var context = new SceneGenerationContext(_project, "9:16", null!, null!, null, null);
+        var context = new SceneGenerationContext(_project, "9:16", null!, null!, null, null, Array.Empty<ApprovedSceneReference>());
 
         await generator.GenerateClipAsync(context, SceneResponse.FromDomain(scene), refreshPrompt: false);
 
         Assert.Equal(0, video.Calls);
         Assert.Equal(0, image.Calls);
+    }
+
+    [Fact]
+    public async Task SceneAssetGenerator_refuses_an_unsupported_visual_type_before_touching_budget_or_a_provider()
+    {
+        var video = new FakeVideoGenerationProvider();
+        var image = new FakeImageGenerationProvider();
+        var usageTracker = new FakeAiUsageTracker();
+        var attemptRepo = new InMemoryGenerationAttemptRepository();
+        var ledger = new CreditLedgerService(attemptRepo, Options.Create(new CreditCostOptions()), NullLogger<CreditLedgerService>.Instance);
+
+        var generator = new SceneAssetGenerator(
+            storyboardService: null!,
+            assetService: null!,
+            promptAgent: null!,
+            videoProvider: video,
+            imageProvider: image,
+            ttsService: null!,
+            audioTiming: null!,
+            assetReferenceService: null!,
+            quotaManager: null!,
+            creditLedger: ledger,
+            fileStorage: null!,
+            usageTracker: usageTracker,
+            storyVisualContextResolver: null!,
+            pricing: Options.Create(new PricingOptions()),
+            creditCosts: Options.Create(new CreditCostOptions()),
+            flow: Options.Create(new GoogleFlowOptions()),
+            videoOptions: Options.Create(new VideoGenerationOptions()),
+            logger: NullLogger<SceneAssetGenerator>.Instance);
+
+        var sb = Storyboard.Create(_project);
+        var scene = sb.AddScene(8, "n", "shot", "push", SceneVisualType.MotionGraphic);
+        var context = new SceneGenerationContext(_project, "9:16", null!, null!, null, null, Array.Empty<ApprovedSceneReference>());
+
+        await Assert.ThrowsAsync<NotSupportedException>(
+            () => generator.GenerateClipAsync(context, SceneResponse.FromDomain(scene), refreshPrompt: false));
+
+        Assert.Equal(0, video.Calls);
+        Assert.Equal(0, image.Calls);
+        Assert.Empty(usageTracker.Records);
+        var usage = await ledger.GetDailyUsageAsync();
+        Assert.Equal(0, usage.Reserved);
+        Assert.Equal(0, usage.Used);
     }
 
     [Fact]
@@ -164,6 +209,7 @@ public class Phase7VideoCompositionTests
     public async Task Full_run_skips_generation_for_a_skipped_clip_but_still_makes_its_voice_over()
     {
         var project = ContentProject.Create("t", "topic", "storytelling", 60, "9:16", "en");
+        project.SetAudioMode(AudioMode.Generated); // this test covers the generated-voice pipeline
         var sb = Storyboard.Create(project.Id);
         var normal = sb.AddScene(8, "one", "shot", "push", SceneVisualType.AiVideo);
         var skipped = sb.AddScene(8, "two", "shot", "pan", SceneVisualType.AiVideo);
@@ -183,6 +229,32 @@ public class Phase7VideoCompositionTests
         Assert.Contains(normal.Id, spy.ClipCalls);
         Assert.DoesNotContain(skipped.Id, spy.ClipCalls);   // no generation request / job
         Assert.Contains(skipped.Id, spy.VoiceCalls);        // narration is still mandatory
+    }
+
+    [Fact]
+    public async Task Full_run_generates_no_TTS_when_the_audio_mode_is_not_generated()
+    {
+        var project = ContentProject.Create("t", "topic", "storytelling", 60, "9:16", "en");
+        // Smart defers per-clip TTS to render time, so asset generation makes none.
+        project.SetAudioMode(AudioMode.Smart);
+
+        var sb = Storyboard.Create(project.Id);
+        sb.AddScene(8, "one", "shot", "push", SceneVisualType.AiVideo);
+        sb.AddScene(8, "two", "shot", "pan", SceneVisualType.AiVideo);
+
+        var repo = new FakeStoryboardRepository(sb);
+        var spy = new SpySceneAssetGenerator();
+        var service = new AssetGenerationService(
+            new FakeContentProjectRepository(project),
+            new FakeStoryboardService(repo),
+            new FakeAssetService(),
+            spy,
+            NullLogger<AssetGenerationService>.Instance);
+
+        await service.RunAsync(project.Id);
+
+        Assert.Equal(2, spy.ClipCalls.Count);   // visuals are still generated
+        Assert.Empty(spy.VoiceCalls);           // ...but not a single TTS request
     }
 
     // ---- 4. Google Flow export is English only ------------------------------
@@ -255,6 +327,7 @@ public class Phase7VideoCompositionTests
             new FakeStoryboardRepository(storyboard),
             new FakeAssetReferenceRepository(),
             ledger,
+            new FakeStoryVisualContextResolver(),
             Options.Create(new CreditCostOptions()),
             Options.Create(new FlowModelOptions()));
     }

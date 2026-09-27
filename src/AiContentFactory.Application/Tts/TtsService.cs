@@ -45,7 +45,8 @@ public record TtsSynthesisResult(
     string MimeType,
     double DurationSeconds,
     string Model,
-    AudioValidationResult Validation);
+    AudioValidationResult Validation,
+    bool IsFree = false);
 
 /// <summary>
 /// Wraps the replaceable <see cref="ITtsProvider"/> with the two things every
@@ -116,6 +117,6 @@ public class TtsService : ITtsService
             throw new AudioValidationException(validation with { IsValid = false, Error = "audio duration could not be determined" });
         }
 
-        return new TtsSynthesisResult(result.AudioBytes, result.MimeType, duration, result.Model, validation);
+        return new TtsSynthesisResult(result.AudioBytes, result.MimeType, duration, result.Model, validation, result.IsFree);
     }
 }

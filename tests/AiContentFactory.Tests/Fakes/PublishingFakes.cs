@@ -38,6 +38,15 @@ public sealed class FakePublishJobRepository : IPublishJobRepository
         return Task.CompletedTask;
     }
 
+    public Task RemoveRangeAsync(IEnumerable<PublishJob> jobs, CancellationToken cancellationToken = default)
+    {
+        foreach (var job in jobs.ToList())
+        {
+            Jobs.Remove(job);
+        }
+        return Task.CompletedTask;
+    }
+
     public Task SaveChangesAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
 }
 
@@ -77,6 +86,11 @@ public sealed class FakeSocialConnectionService : ISocialConnectionService
         _connected.Contains(platform)
             ? Task.FromResult(new UsableAccessToken("token-" + platform, "acct-" + platform))
             : throw new PublishException($"{platform} chưa kết nối.", retryable: false);
+
+    public Task<PlatformPublishOptions> GetPublishOptionsAsync(PublishTarget platform, CancellationToken cancellationToken = default) =>
+        _connected.Contains(platform)
+            ? Task.FromResult(PlatformPublishOptions.None)
+            : throw new PublishException($"{platform} chưa kết nối.", retryable: false);
 }
 
 public sealed class FakeSocialConnectionRepository : ISocialConnectionRepository
@@ -114,18 +128,26 @@ public sealed class FakeSocialPlatformPublisher : ISocialPlatformPublisher
     public int UploadCalls { get; private set; }
     public int RefreshCalls { get; private set; }
 
+    /// <summary>When set, RefreshAsync invokes this instead of returning the default success result (throw to simulate a failed refresh).</summary>
+    public Func<string, OAuthTokens>? RefreshOverride { get; set; }
+
     /// <summary>When set, ExchangeCodeAsync returns these as multi-target candidates (Facebook Pages).</summary>
     public IReadOnlyList<OAuthAccountOption>? Accounts { get; set; }
+
+    /// <summary>Access-token expiry ExchangeCodeAsync hands back - set in the past to force an immediate refresh in tests.</summary>
+    public DateTimeOffset ExchangeExpiresAt { get; set; } = DateTimeOffset.UtcNow.AddHours(1);
 
     public string GetAuthorizationUrl(string redirectUri, string state) => $"https://auth.example/{Platform}?state={state}";
 
     public Task<OAuthTokens> ExchangeCodeAsync(string code, string redirectUri, CancellationToken cancellationToken = default) =>
-        Task.FromResult(new OAuthTokens("access", "refresh", DateTimeOffset.UtcNow.AddHours(1), "scope", "acct", "Account", Accounts));
+        Task.FromResult(new OAuthTokens("access", "refresh", ExchangeExpiresAt, "scope", "acct", "Account", Accounts));
 
     public Task<OAuthTokens> RefreshAsync(string refreshToken, CancellationToken cancellationToken = default)
     {
         RefreshCalls++;
-        return Task.FromResult(new OAuthTokens("access2", "refresh", DateTimeOffset.UtcNow.AddHours(1), "scope", "acct", "Account"));
+        return Task.FromResult(RefreshOverride is null
+            ? new OAuthTokens("access2", "refresh", DateTimeOffset.UtcNow.AddHours(1), "scope", "acct", "Account")
+            : RefreshOverride(refreshToken));
     }
 
     public VideoConstraintResult ValidateVideo(MediaInfo probe, long sizeBytes) => Constraint(probe, sizeBytes);

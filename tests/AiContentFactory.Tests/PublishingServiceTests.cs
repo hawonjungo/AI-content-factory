@@ -345,6 +345,59 @@ public class PublishingServiceTests
         Assert.Equal(PublishJobStatus.Published, byPlatform[PublishTarget.InstagramReels].Status);
     }
 
+    // ---- clear history ------------------------------------------------
+
+    [Fact]
+    public async Task ClearHistory_removes_failed_and_cancelled_jobs_but_keeps_published_ones()
+    {
+        var h = await BuildAsync();
+        h.Publishers[PublishTarget.TikTok].Upload = _ => throw new PublishException("400 bad request", retryable: false);
+        await h.Service.PublishAsync(h.ProjectId, Now(PublishTarget.TikTok, PublishTarget.YouTubeShorts));
+        foreach (var job in h.Jobs.Jobs)
+        {
+            await h.Service.RunJobAsync(job.Id);
+        }
+        // TikTok job is now Failed (permanent), YouTube job is Published.
+        Assert.Equal(2, h.Jobs.Jobs.Count);
+
+        var remaining = await h.Service.ClearHistoryAsync(h.ProjectId);
+
+        var survivor = Assert.Single(h.Jobs.Jobs); // the Failed TikTok job was deleted
+        Assert.Equal(PublishJobStatus.Published, survivor.Status);
+        Assert.Equal(PublishTarget.YouTubeShorts, survivor.Platform);
+        var remainingDto = Assert.Single(remaining);
+        Assert.Equal(nameof(PublishTarget.YouTubeShorts), remainingDto.Platform);
+        Assert.NotNull(remainingDto.PublishedUrl);
+    }
+
+    [Fact]
+    public async Task ClearHistory_never_touches_a_job_still_in_flight()
+    {
+        var h = await BuildAsync();
+        var at = DateTimeOffset.UtcNow.AddHours(2);
+        await h.Service.PublishAsync(h.ProjectId, new PublishRequest(new[] { PublishTarget.TikTok }, "T", null, null, PublishMode.Schedule, at));
+
+        var remaining = await h.Service.ClearHistoryAsync(h.ProjectId);
+
+        Assert.Single(h.Jobs.Jobs);
+        Assert.Single(remaining);
+        Assert.Equal(nameof(PublishJobStatus.Scheduled), remaining[0].Status);
+    }
+
+    [Fact]
+    public async Task ClearHistory_is_a_no_op_when_there_is_nothing_to_clear()
+    {
+        var h = await BuildAsync();
+        await h.Service.PublishAsync(h.ProjectId, Now(PublishTarget.TikTok));
+        await h.Service.RunJobAsync(h.Jobs.Jobs.Single().Id); // Published
+
+        var remaining = await h.Service.ClearHistoryAsync(h.ProjectId);
+
+        Assert.Single(h.Jobs.Jobs);
+        Assert.Single(remaining);
+        Assert.Equal(nameof(PublishJobStatus.Published), remaining[0].Status);
+    }
+
     [Fact]
     public async Task Facebook_publish_passes_the_Page_id_and_Page_token_to_the_provider()
     {

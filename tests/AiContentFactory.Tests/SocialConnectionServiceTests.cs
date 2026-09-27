@@ -14,6 +14,7 @@ public class SocialConnectionServiceTests
         public required SocialConnectionService Service { get; init; }
         public required FakeSocialConnectionRepository Repo { get; init; }
         public required FakeSocialPlatformPublisher Facebook { get; init; }
+        public required FakeSocialPlatformPublisher Instagram { get; init; }
     }
 
     private static Harness Build()
@@ -29,7 +30,7 @@ public class SocialConnectionServiceTests
             Options.Create(new PublishingOptions { PublicBaseUrl = "https://api.test" }),
             NullLogger<SocialConnectionService>.Instance);
 
-        return new Harness { Service = service, Repo = repo, Facebook = facebook };
+        return new Harness { Service = service, Repo = repo, Facebook = facebook, Instagram = instagram };
     }
 
     private static OAuthAccountOption Page(string id, string name) =>
@@ -119,5 +120,33 @@ public class SocialConnectionServiceTests
         Assert.Null(dto.Pages);
         var token = await h.Service.GetUsableAccessTokenAsync(PublishTarget.InstagramReels);
         Assert.Equal("access", token.AccessToken);
+    }
+
+    [Fact]
+    public async Task A_transient_refresh_failure_does_not_expire_the_connection()
+    {
+        var h = Build();
+        h.Instagram.ExchangeExpiresAt = DateTimeOffset.UtcNow.AddMinutes(-1); // needs refresh immediately
+        await h.Service.CompleteAsync(PublishTarget.InstagramReels, "code", null);
+
+        h.Instagram.RefreshOverride = _ => throw new PublishException("Instagram OAuth thất bại: 503", retryable: true);
+
+        var ex = await Assert.ThrowsAsync<PublishException>(() => h.Service.GetUsableAccessTokenAsync(PublishTarget.InstagramReels));
+        Assert.True(ex.Retryable);
+        Assert.Equal(nameof(SocialConnectionStatus.Connected), h.Repo.Rows.Single().Status.ToString());
+    }
+
+    [Fact]
+    public async Task A_permanent_refresh_failure_marks_the_connection_Expired()
+    {
+        var h = Build();
+        h.Instagram.ExchangeExpiresAt = DateTimeOffset.UtcNow.AddMinutes(-1); // needs refresh immediately
+        await h.Service.CompleteAsync(PublishTarget.InstagramReels, "code", null);
+
+        h.Instagram.RefreshOverride = _ => throw new PublishException("Instagram OAuth thất bại: invalid_grant", retryable: false);
+
+        var ex = await Assert.ThrowsAsync<PublishException>(() => h.Service.GetUsableAccessTokenAsync(PublishTarget.InstagramReels));
+        Assert.False(ex.Retryable);
+        Assert.Equal(nameof(SocialConnectionStatus.Expired), h.Repo.Rows.Single().Status.ToString());
     }
 }

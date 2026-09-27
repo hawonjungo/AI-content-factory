@@ -1,5 +1,6 @@
 using AiContentFactory.Application.ContentProjects;
 using AiContentFactory.Application.Costs;
+using AiContentFactory.Domain.ContentProjects;
 using AiContentFactory.Application.Generation;
 using AiContentFactory.Application.Presets;
 using AiContentFactory.Application.Rendering;
@@ -22,6 +23,7 @@ public class WizardController : ControllerBase
 {
     private readonly IProjectOverviewService _overviewService;
     private readonly IPresetService _presetService;
+    private readonly IContentProjectService _contentProjectService;
     private readonly IGenerationEstimator _estimator;
     private readonly IRenderService _renderService;
     private readonly IFlowGenerationPlanService _flowPlanService;
@@ -32,6 +34,7 @@ public class WizardController : ControllerBase
     public WizardController(
         IProjectOverviewService overviewService,
         IPresetService presetService,
+        IContentProjectService contentProjectService,
         IGenerationEstimator estimator,
         IRenderService renderService,
         IFlowGenerationPlanService flowPlanService,
@@ -41,6 +44,7 @@ public class WizardController : ControllerBase
     {
         _overviewService = overviewService;
         _presetService = presetService;
+        _contentProjectService = contentProjectService;
         _estimator = estimator;
         _renderService = renderService;
         _flowPlanService = flowPlanService;
@@ -89,6 +93,43 @@ public class WizardController : ControllerBase
         try
         {
             var updated = await _presetService.ApplyAsync(contentProjectId, request, cancellationToken);
+            return updated is null ? NotFound() : Ok(updated);
+        }
+        catch (DomainException ex)
+        {
+            return Problem(ex.Message, statusCode: StatusCodes.Status400BadRequest);
+        }
+    }
+
+    /// <summary>
+    /// Step 6 Voice option: keep the clip's own embedded audio ("Original"),
+    /// generate a fresh AI voice-over ("Generated"), or mute all clip audio
+    /// ("Muted"). Applied by the composition pipeline on the next render.
+    /// </summary>
+    [HttpPut("audio-mode")]
+    public async Task<ActionResult<ContentProjectResponse>> SetAudioMode(
+        Guid contentProjectId,
+        [FromBody] SetAudioModeRequest request,
+        CancellationToken cancellationToken)
+    {
+        var updated = await _contentProjectService.SetAudioModeAsync(contentProjectId, request, cancellationToken);
+        return updated is null ? NotFound() : Ok(updated);
+    }
+
+    /// <summary>
+    /// Step 6 narration voice (preset / gender / style / rate / language). Also
+    /// invalidates the project's existing TTS tracks so the next render actually
+    /// uses the new voice instead of reusing the old audio.
+    /// </summary>
+    [HttpPut("voice-settings")]
+    public async Task<ActionResult<ContentProjectResponse>> SetVoiceSettings(
+        Guid contentProjectId,
+        [FromBody] SetVoiceSettingsRequest request,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var updated = await _contentProjectService.SetVoiceSettingsAsync(contentProjectId, request, cancellationToken);
             return updated is null ? NotFound() : Ok(updated);
         }
         catch (DomainException ex)

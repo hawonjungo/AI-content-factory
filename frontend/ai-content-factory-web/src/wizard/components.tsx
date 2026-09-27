@@ -1,4 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
+import { pricingApi, type UnitPricing } from "../api/client";
 import type {
   CompositionStatus,
   CreditSummary,
@@ -131,6 +132,164 @@ export function formatUsd(value: number): string {
   return value < 0.01 && value > 0 ? "< $0.01" : `$${value.toFixed(2)}`;
 }
 
+// ---------------------------------------------------------------------------
+// Status: one badge for every status shown in the wizard - clip state,
+// publish job state, generation attempt state, composition/validation
+// status, project list status. Every caller used to define its own
+// enum-to-classname map and repeat the `<span className="wz-badge ...">`
+// markup; they now just map their own enum to one of four tones.
+// ---------------------------------------------------------------------------
+
+export type StatusTone = "success" | "working" | "warning" | "danger" | "neutral";
+
+const STATUS_TONE_CLASS: Record<StatusTone, string> = {
+  success: "wz-badge-ready",
+  working: "wz-badge-working",
+  warning: "wz-badge-warning",
+  danger: "wz-badge-failed",
+  neutral: "",
+};
+
+export function StatusBadge({ tone, title, children }: { tone: StatusTone; title?: string; children: ReactNode }) {
+  return (
+    <span className={`wz-badge ${STATUS_TONE_CLASS[tone]}`} title={title}>
+      {children}
+    </span>
+  );
+}
+
+/** For status strings that come straight off the wire (e.g. "ready"/"missing"/"pending") rather than a typed enum. */
+export function statusStringTone(value: string): StatusTone {
+  if (["ready", "passed", "completed", "burned", "smart", "original", "muted"].includes(value)) return "success";
+  if (["running", "partial", "pending"].includes(value)) return "working";
+  if (["missing", "failed"].includes(value)) return "danger";
+  return "neutral";
+}
+
+// ---------------------------------------------------------------------------
+// Cost visibility: a compact note shown next to any button that spends tokens
+// or money, or that can hit an AI usage/spend limit. One component so every
+// AI-triggering button in the wizard says the same thing the same way.
+// ---------------------------------------------------------------------------
+
+export type CostKind = "text" | "longText" | "image" | "video" | "clipCheck" | "free";
+
+/** Same defaults as the backend PricingOptions - used until GET /pricing answers (or if it fails). */
+const DEFAULT_PRICING: UnitPricing = {
+  fastVideoUsdPer8s: 3.2,
+  liteVideoUsdPer8s: 0.64,
+  imageUsd: 0.04,
+  ttsUsdPer1000Chars: 0.02,
+  textCallUsd: 0.002,
+  longTextCallUsd: 0.01,
+  clipCheckUsd: 0.003,
+};
+
+let pricingCache: UnitPricing | null = null;
+let pricingRequest: Promise<UnitPricing> | null = null;
+
+/** Per-action cost estimates from the backend config, fetched once per page load and shared by every CostNote. */
+export function usePricing(): UnitPricing {
+  const [pricing, setPricing] = useState<UnitPricing>(pricingCache ?? DEFAULT_PRICING);
+  useEffect(() => {
+    if (pricingCache) return;
+    let cancelled = false;
+    pricingRequest ??= pricingApi.get().then((p) => (pricingCache = p));
+    pricingRequest
+      .then((p) => {
+        if (!cancelled) setPricing(p);
+      })
+      .catch(() => {
+        pricingRequest = null; // keep the defaults; retry on the next mount
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  return pricing;
+}
+
+/** A cost estimate in USD: small amounts keep 3 decimals so "$0.002" never shows as "$0.00". */
+export function formatUsdEstimate(value: number): string {
+  if (value <= 0) return "$0";
+  return value < 0.1 ? `$${value.toFixed(3).replace(/0+$/, "").replace(/\.$/, "")}` : `$${value.toFixed(2)}`;
+}
+
+const COST_ICON: Record<CostKind, string> = {
+  text: "🪙",
+  longText: "🪙",
+  image: "🪙",
+  video: "💸",
+  clipCheck: "🪙",
+  free: "🆓",
+};
+
+function costLabel(kind: CostKind, pricing: UnitPricing): { perUnit: number | null; label: string } {
+  switch (kind) {
+    case "text":
+      return { perUnit: pricing.textCallUsd, label: "gọi AI (văn bản ngắn)" };
+    case "longText":
+      return { perUnit: pricing.longTextCallUsd, label: "gọi AI (văn bản dài)" };
+    case "image":
+      return { perUnit: pricing.imageUsd, label: "ảnh AI" };
+    case "clipCheck":
+      return { perUnit: pricing.clipCheckUsd, label: "kiểm tra clip bằng AI" };
+    case "video":
+      return {
+        perUnit: null,
+        label: `Veo TÍNH PHÍ THẬT: ≈ ${formatUsdEstimate(pricing.liteVideoUsdPer8s)} (Lite) – ${formatUsdEstimate(
+          pricing.fastVideoUsdPer8s,
+        )} (Fast) mỗi clip 8 giây`,
+      };
+    case "free":
+      return { perUnit: 0, label: "miễn phí với app" };
+  }
+}
+
+/**
+ * The cost note next to a billable button: always states an estimated USD
+ * amount. `units` multiplies the per-action estimate (e.g. one call per
+ * scene); `usd` overrides the per-action estimate when the caller already
+ * knows it (e.g. a server-computed estimate). `children` adds context after
+ * the number.
+ */
+export function CostNote({
+  kind,
+  units,
+  unitLabel,
+  usd,
+  children,
+}: {
+  kind: CostKind;
+  units?: number;
+  unitLabel?: string;
+  usd?: number;
+  children?: ReactNode;
+}) {
+  const pricing = usePricing();
+  const { perUnit, label } = costLabel(kind, pricing);
+  const each = usd ?? perUnit;
+
+  let amount: string;
+  if (kind === "free") {
+    amount = "$0";
+  } else if (each === null) {
+    amount = label;
+  } else if (units !== undefined && units > 1) {
+    amount = `≈ ${formatUsdEstimate(each)} × ${units}${unitLabel ? ` ${unitLabel}` : ""} ≈ ${formatUsdEstimate(each * units)}`;
+  } else {
+    amount = `≈ ${formatUsdEstimate(each)}`;
+  }
+
+  const title = `Ước tính chi phí (${label}) - con số lập kế hoạch từ cấu hình giá, không phải hoá đơn thật của nhà cung cấp.`;
+  return (
+    <span className="wz-cost-note" title={title}>
+      <span aria-hidden="true">{COST_ICON[kind]}</span> {amount}
+      {children ? <> · {children}</> : kind !== "video" && each !== null ? ` · ${label}` : null}
+    </span>
+  );
+}
+
 /**
  * The cost/time panel shown before anything is spent. The two headline numbers
  * are deliberately separated: how long the finished VIDEO is, versus how long
@@ -206,8 +365,8 @@ export function CostEstimate({ estimate, title = "Ước tính" }: { estimate: G
 
       <p className="wz-hint">
         Video AI (Veo) tính phí thật theo mỗi giây được tạo ra — đây là API trả phí, <em>không</em> phải hạn mức
-        credit miễn phí. Ảnh tĩnh AI rẻ hơn nhiều (gần $0). Lồng tiếng, viết kịch bản và ghép video nằm trong hạn mức
-        miễn phí của Gemini. Muốn giảm chi phí: đổi bớt cảnh sang ảnh tĩnh, giảm số clip, hoặc tự tạo vài clip ở
+        credit miễn phí. Ảnh tĩnh AI rẻ hơn nhiều (vài cent/ảnh). Lồng tiếng Gemini và các lần gọi AI văn bản tốn rất ít
+        (vài phần nghìn đô), giọng 🆓 và ghép video thì miễn phí. Muốn giảm chi phí: đổi bớt cảnh sang ảnh tĩnh, giảm số clip, hoặc tự tạo vài clip ở
         labs.google/flow rồi tải lên (mục "Tải clip có sẵn").
         {estimate.monthlyBudgetRemainingUsd !== null &&
           ` Trần chi phí tháng (cấu hình) còn ${formatUsd(estimate.monthlyBudgetRemainingUsd)}.`}
@@ -344,13 +503,13 @@ const ATTEMPT_LABEL: Record<GenerationAttemptState, string> = {
   Validated: "Đã kiểm tra",
 };
 
-const ATTEMPT_CLASS: Record<GenerationAttemptState, string> = {
-  Pending: "",
-  Generating: "wz-badge-working",
-  Completed: "wz-badge-ready",
-  Failed: "wz-badge-failed",
-  Retrying: "wz-badge-working",
-  Validated: "wz-badge-ready",
+const ATTEMPT_TONE: Record<GenerationAttemptState, StatusTone> = {
+  Pending: "neutral",
+  Generating: "working",
+  Completed: "success",
+  Failed: "danger",
+  Retrying: "working",
+  Validated: "success",
 };
 
 export function AttemptsPanel({ attempts }: { attempts: GenerationAttempt[] }) {
@@ -362,7 +521,7 @@ export function AttemptsPanel({ attempts }: { attempts: GenerationAttempt[] }) {
       <ul>
         {attempts.map((a) => (
           <li key={a.id}>
-            <span className={`wz-badge ${ATTEMPT_CLASS[a.state]}`}>{ATTEMPT_LABEL[a.state]}</span>
+            <StatusBadge tone={ATTEMPT_TONE[a.state]}>{ATTEMPT_LABEL[a.state]}</StatusBadge>
             <span className="wz-attempt-what">
               {a.kind}
               {a.sceneNumber ? ` · cảnh ${a.sceneNumber}` : ""} · {a.model}
@@ -386,20 +545,24 @@ export function AttemptsPanel({ attempts }: { attempts: GenerationAttempt[] }) {
 // / validation. Narration is mandatory - it is called out first.
 // ---------------------------------------------------------------------------
 
-function statusTone(value: string): string {
-  if (["ready", "passed", "completed", "burned"].includes(value)) return "wz-badge-ready";
-  if (["running", "partial", "pending"].includes(value)) return "wz-badge-working";
-  if (["missing", "failed"].includes(value)) return "wz-badge-failed";
-  return "";
-}
+const AUDIO_ROW: Record<string, { label: string; value: string; extra: string }> = {
+  smart: { label: "Âm thanh", value: "tự động", extra: "Giữ tiếng gốc theo từng clip · lồng tiếng AI cho clip không có tiếng" },
+  original: { label: "Âm thanh", value: "ưu tiên gốc", extra: "Giữ tiếng gốc mọi clip có sẵn · AI voice dự phòng cho clip thiếu tiếng" },
+  muted: { label: "Âm thanh", value: "tắt tiếng", extra: "Video cuối không có tiếng — phụ đề vẫn hiển thị" },
+};
 
 export function CompositionStatusPanel({ composition }: { composition: CompositionStatus }) {
+  const generatedVoice = composition.audioMode === "Generated";
+  const audioRow = AUDIO_ROW[composition.narrationStatus];
+
   const rows: [string, string, string][] = [
-    [
-      "Lời đọc (bắt buộc)",
-      composition.narrationStatus,
-      `${composition.scenesWithNarration}/${composition.scenesExpectingNarration} cảnh · ${composition.narrationSeconds.toFixed(1)}s`,
-    ],
+    audioRow
+      ? [audioRow.label, audioRow.value, audioRow.extra]
+      : [
+          "Lời đọc (bắt buộc)",
+          composition.narrationStatus,
+          `${composition.scenesWithNarration}/${composition.scenesExpectingNarration} cảnh · ${composition.narrationSeconds.toFixed(1)}s`,
+        ],
     ["Phụ đề", composition.captionStatus, ""],
     ["Ghép hình", composition.compositionStatus, ""],
     ["Kết xuất", composition.renderStatus, ""],
@@ -413,12 +576,12 @@ export function CompositionStatusPanel({ composition }: { composition: Compositi
         {rows.map(([k, v, extra]) => (
           <li key={k}>
             <span>{k}</span>
-            <span className={`wz-badge ${statusTone(v)}`}>{v}</span>
+            <StatusBadge tone={statusStringTone(v)}>{v}</StatusBadge>
             {extra && <span className="wz-hint">{extra}</span>}
           </li>
         ))}
       </ul>
-      {composition.narrationStatus === "missing" && (
+      {generatedVoice && composition.narrationStatus === "missing" && (
         <p className="wz-error">
           Chưa có lời đọc — video không thể hoàn tất khi thiếu tiếng người dẫn. Hãy dựng lại clip để tạo lời đọc.
         </p>
@@ -449,11 +612,51 @@ export function ValidationList({ title, items, error }: { title: string; items: 
 
 export function ValidationBadge({ validation }: { validation: ValidationSummary }) {
   if (!validation.hasRun) {
-    return <span className="wz-badge wz-badge-working">Chưa kiểm tra</span>;
+    return <StatusBadge tone="working">Chưa kiểm tra</StatusBadge>;
   }
   return (
-    <span className={`wz-badge ${validation.ok ? "wz-badge-ready" : "wz-badge-failed"}`}>
+    <StatusBadge tone={validation.ok ? "success" : "danger"}>
       {validation.ok ? "Đạt kiểm tra" : "Không đạt"}
-    </span>
+    </StatusBadge>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Loading / error / empty: the three states every async panel in the wizard
+// needs, previously each written out ad hoc per call site (a bare
+// `<p>Đang tải...</p>`, an inline `{error && <p className="wz-error">}`, or a
+// one-off empty message). Same content per caller, just one consistent shell.
+// ---------------------------------------------------------------------------
+
+/** A loading message with a spinner. `label` defaults to the generic string, but callers with something more specific to say (e.g. "Đang lập kế hoạch Flow...") should still pass their own. */
+export function Loading({ label = "Đang tải..." }: { label?: string }) {
+  return (
+    <p className="wz-loading" role="status" aria-live="polite">
+      <span className="wz-spinner" aria-hidden="true" />
+      {label}
+    </p>
+  );
+}
+
+export function ErrorMessage({ message }: { message: string | null | undefined }) {
+  if (!message) return null;
+  return <p className="wz-error">{message}</p>;
+}
+
+export function EmptyState({
+  title,
+  description,
+  action,
+}: {
+  title: string;
+  description?: string;
+  action?: ReactNode;
+}) {
+  return (
+    <div className="wz-empty">
+      <strong>{title}</strong>
+      {description && <p className="wz-hint">{description}</p>}
+      {action}
+    </div>
   );
 }

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
-import { flowApi, type FlowImportStatus } from "../api/client";
+import { describeApiError, flowApi, type FlowImportStatus } from "../api/client";
+import { ErrorMessage, Loading, StatusBadge } from "./components";
 
 /**
  * Step 6: import the clips generated in Google Flow. Each clip is validated
@@ -24,7 +25,7 @@ export function FlowImportPanel({
     flowApi
       .getImportStatus(contentProjectId)
       .then(setStatus)
-      .catch((e) => setError(e instanceof Error ? e.message : "Không tải được trạng thái import."));
+      .catch((e) => setError(describeApiError(e, "Không tải được trạng thái import.")));
   }, [contentProjectId]);
 
   useEffect(load, [load]);
@@ -43,13 +44,13 @@ export function FlowImportPanel({
       load();
       onChanged();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Import thất bại.");
+      setError(describeApiError(e, "Import thất bại."));
     } finally {
       setBusyScene(null);
     }
   };
 
-  if (!status) return <p className="wz-hint">Đang kiểm tra clip Flow...</p>;
+  if (!status) return <Loading label="Đang kiểm tra clip Flow..." />;
 
   return (
     <section className="wz-card">
@@ -58,7 +59,7 @@ export function FlowImportPanel({
         {status.importedValid}/{status.scenesNeedingFlow} clip Flow hợp lệ ·{" "}
         {status.readyForRender ? "✅ đủ hình cho mọi cảnh" : `⚠️ còn thiếu ${status.missingOrInvalid}`}
       </p>
-      {error && <p className="wz-error">{error}</p>}
+      <ErrorMessage message={error} />
 
       <ul className="wz-compo">
         {status.scenes.map((s) => {
@@ -68,7 +69,7 @@ export function FlowImportPanel({
               <span style={{ minWidth: 120 }}>
                 Cảnh {s.sceneNumber} <span className="wz-hint">[{s.generationType}]</span>
               </span>
-              <span className={`wz-badge ${ok ? "wz-badge-ready" : "wz-badge-failed"}`}>
+              <StatusBadge tone={ok ? "success" : "danger"}>
                 {s.needsFlowClip
                   ? s.hasClip
                     ? s.clipValid
@@ -78,7 +79,7 @@ export function FlowImportPanel({
                   : ok
                     ? "OK"
                     : "thiếu hình"}
-              </span>
+              </StatusBadge>
               {s.hasClip && s.durationSeconds != null && (
                 <span className="wz-hint">
                   {s.durationSeconds.toFixed(1)}s · {s.width}x{s.height}

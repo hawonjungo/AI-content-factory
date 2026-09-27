@@ -106,7 +106,10 @@ public class ClipRegenerationService : IClipRegenerationService
             // reproduce the clip the user just rejected.
             await _sceneGenerator.GenerateClipAsync(context, scene, refreshPrompt: true, cancellationToken);
 
-            if (request.RegenerateVoice || narrationChanged)
+            // "Mute" has no voice track. "Generate new voice" and "Smart" both
+            // can - Smart uses it only if this clip lacks original audio, which
+            // the renderer decides, so regenerating it here is safe either way.
+            if (project.AudioMode != AudioMode.Muted && (request.RegenerateVoice || narrationChanged))
             {
                 await _sceneGenerator.GenerateVoiceAsync(context, scene, cancellationToken);
             }

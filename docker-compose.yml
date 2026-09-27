@@ -30,6 +30,9 @@ services:
       Cors__AllowedOrigins__0: ${FRONTEND_ORIGIN:-http://localhost:5173}
       Llm__Gemini__ApiKey: ${GEMINI_API_KEY:-}
       Llm__Gemini__Model: ${GEMINI_MODEL:-gemini-2.5-flash}
+      Llm__Groq__ApiKey: ${GROQ_API_KEY:-}
+      Stock__Pexels__ApiKey: ${PEXELS_API_KEY:-}
+      Tts__Kokoro__BaseUrl: ${KOKORO_BASE_URL:-http://kokoro:8880}
       Budget__MonthlyLimitUsd: ${BUDGET_MONTHLY_LIMIT_USD:-50}
       Qa__MinimumOverallScoreToProceed: ${QA_MIN_SCORE:-6.0}
       Publishing__PublicBaseUrl: ${PUBLISHING_PUBLIC_BASE_URL:-}
@@ -47,6 +50,16 @@ services:
       - asset_storage:/app/storage
     ports:
       - "8080:8080"
+
+  # Optional FREE voice-over (Kokoro-82M, Apache-2.0, English only). Not started
+  # by default: `docker compose --profile free-tts up -d kokoro`. ~2 GB image,
+  # CPU is enough. Consider pinning a release tag instead of :latest.
+  kokoro:
+    image: ghcr.io/remsky/kokoro-fastapi-cpu:latest
+    profiles: ["free-tts"]
+    restart: unless-stopped
+    ports:
+      - "8880:8880"
 
 volumes:
   postgres_data:

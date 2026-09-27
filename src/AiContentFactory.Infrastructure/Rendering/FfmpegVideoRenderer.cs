@@ -59,6 +59,17 @@ public class FfmpegVideoRenderer : IVideoRenderer
                 var assPath = Path.Combine(workDir, "subtitles.ass");
                 AssSubtitleWriter.Write(request.Cues, request.Captions, request.Width, request.Height, assPath);
 
+                // Keep the exact subtitle script next to the finished video so a
+                // caption problem can be inspected without re-deriving the cues.
+                try
+                {
+                    File.Copy(assPath, Path.ChangeExtension(request.OutputAbsolutePath, ".subtitles.ass"), overwrite: true);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogDebug(ex, "Could not save a copy of the subtitle script");
+                }
+
                 captionedPath = Path.Combine(workDir, "subtitled.mp4");
                 await BurnSubtitlesAsync(combinedPath, assPath, captionedPath, cancellationToken);
             }

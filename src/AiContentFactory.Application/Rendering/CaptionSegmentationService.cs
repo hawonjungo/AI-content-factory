@@ -5,9 +5,15 @@ using AiContentFactory.Domain.ContentProjects;
 namespace AiContentFactory.Application.Rendering;
 
 /// <param name="CaptionText">The on-screen text for the scene (Scene.EffectiveCaptionText) - distinct from the narration.</param>
-/// <param name="Timing">Word/sentence timing from <see cref="IAudioTimingService"/> for the scene's narration.</param>
+/// <param name="Timing">Word/sentence timing from <see cref="IAudioTimingService"/> for the scene's narration. May be <see cref="AudioTiming.Empty"/>.</param>
 /// <param name="SceneOffsetSeconds">Where this scene starts on the finished timeline.</param>
-public record SceneCaptionInput(string CaptionText, AudioTiming Timing, double SceneOffsetSeconds);
+/// <param name="SceneDurationSeconds">
+/// The scene's length on the timeline. Used as the caption span when there is
+/// no narration timing (e.g. a clip whose original audio is kept) so subtitles
+/// stay a fully independent layer - never dropped just because a scene has no
+/// TTS track.
+/// </param>
+public record SceneCaptionInput(string CaptionText, AudioTiming Timing, double SceneOffsetSeconds, double SceneDurationSeconds = 0);
 
 public interface ICaptionSegmentationService
 {
@@ -47,12 +53,17 @@ public class CaptionSegmentationService : ICaptionSegmentationService
 
         foreach (var scene in scenes)
         {
-            if (string.IsNullOrWhiteSpace(scene.CaptionText) || !scene.Timing.HasTiming)
+            // Captions are an independent layer: a scene is only skipped when it
+            // has no text at all, or when there is neither a narration timing nor
+            // a known duration to spread the words across. The audio mode never
+            // decides whether subtitles appear.
+            var span = scene.Timing.HasTiming ? scene.Timing.TotalSeconds : scene.SceneDurationSeconds;
+            if (string.IsNullOrWhiteSpace(scene.CaptionText) || span <= 0)
             {
                 continue;
             }
 
-            var words = MapWords(scene);
+            var words = MapWords(scene, span);
             if (words.Count == 0)
             {
                 continue;
@@ -65,7 +76,40 @@ public class CaptionSegmentationService : ICaptionSegmentationService
             }
         }
 
-        return EnforceMonotonic(cues);
+        // The subtitle timeline can never run past the visual timeline, no
+        // matter how the words fell out - clamp the tail to the last scene's end.
+        var timelineEnd = scenes
+            .Where(s => s.SceneDurationSeconds > 0)
+            .Select(s => s.SceneOffsetSeconds + s.SceneDurationSeconds)
+            .DefaultIfEmpty(0)
+            .Max();
+
+        return EnforceMonotonic(ClampToTimeline(cues, timelineEnd));
+    }
+
+    private static List<CaptionCue> ClampToTimeline(List<CaptionCue> cues, double timelineEnd)
+    {
+        if (timelineEnd <= 0)
+        {
+            return cues;
+        }
+
+        var clamped = new List<CaptionCue>(cues.Count);
+        foreach (var cue in cues)
+        {
+            if (cue.StartSeconds >= timelineEnd)
+            {
+                continue; // starts after the video ends - drop it
+            }
+
+            var end = Math.Min(cue.EndSeconds, timelineEnd);
+            var words = cue.Words
+                .Select(w => new CaptionWord(w.Text, Math.Min(w.StartSeconds, timelineEnd), Math.Min(w.EndSeconds, timelineEnd)))
+                .ToList();
+            clamped.Add(cue with { EndSeconds = end, Words = words });
+        }
+
+        return clamped;
     }
 
     /// <summary>Rough line count for a rendered cue - used by tests and the final validator, not by libass.</summary>
@@ -98,10 +142,12 @@ public class CaptionSegmentationService : ICaptionSegmentationService
     /// <summary>
     /// Scene-local word timings for the caption text. When the caption text is
     /// the narration verbatim (the common case) the narration word times are
-    /// used directly; otherwise the narration span is divided across the caption
-    /// words by spoken-length weight so the captions still track the audio.
+    /// used directly; otherwise <paramref name="span"/> is divided across the
+    /// caption words by spoken-length weight so the captions still track the
+    /// scene - whether the span comes from real narration timing or, when there
+    /// is none, from the scene's own duration.
     /// </summary>
-    private static List<CaptionWord> MapWords(SceneCaptionInput scene)
+    private static List<CaptionWord> MapWords(SceneCaptionInput scene, double span)
     {
         var tokens = Tokenizer.Matches(scene.CaptionText).Select(m => m.Value).ToArray();
         if (tokens.Length == 0)
@@ -110,14 +156,13 @@ public class CaptionSegmentationService : ICaptionSegmentationService
         }
 
         var narration = scene.Timing.Words;
-        if (narration.Count == tokens.Length)
+        if (scene.Timing.HasTiming && narration.Count == tokens.Length)
         {
             return tokens
                 .Select((t, i) => new CaptionWord(t, narration[i].StartSeconds, narration[i].EndSeconds))
                 .ToList();
         }
 
-        var span = scene.Timing.TotalSeconds;
         var weights = tokens.Select(t => 2.0 + Math.Max(1, t.Count(char.IsLetterOrDigit))).ToArray();
         var sum = weights.Sum();
 

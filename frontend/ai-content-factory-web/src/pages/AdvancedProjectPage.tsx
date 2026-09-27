@@ -189,6 +189,10 @@ function AdvancedProjectPage() {
           Refresh
         </button>
       </div>
+      <p style={{ fontSize: "0.8em", color: "#a60", marginTop: 0, marginBottom: "0.75rem" }}>
+        🪙 Steps 1 &amp; 2 call the text model — tokens, counts toward the AI spend cap. 💸 Step 4 runs Veo:
+        real per-second video billing. Refresh is free.
+      </p>
 
       {busyAction && (
         <p style={{ color: "#0a6", fontWeight: "bold" }}>

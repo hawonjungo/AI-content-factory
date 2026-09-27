@@ -100,7 +100,11 @@ public class AssetGenerationService : IAssetGenerationService
                 // mid-run failure (e.g. a Gemini quota error) re-fails immediately on
                 // the first already-completed scene instead of ever reaching the one
                 // that actually still needs work.
-                if (!HasReadyAsset(assets, scene.Id, AssetType.Voice))
+                //
+                // Only "generate new voice" pre-generates TTS for every scene
+                // here. "Smart" defers it to render time and only for clips that
+                // actually lack original audio; "mute" never uses TTS.
+                if (project.AudioMode == AudioMode.Generated && !HasReadyAsset(assets, scene.Id, AssetType.Voice))
                 {
                     await _sceneGenerator.GenerateVoiceAsync(context, scene, cancellationToken);
                 }

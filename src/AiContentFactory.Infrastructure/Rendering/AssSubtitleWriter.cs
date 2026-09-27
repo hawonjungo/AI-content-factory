@@ -23,6 +23,14 @@ namespace AiContentFactory.Infrastructure.Rendering;
 /// </summary>
 public static class AssSubtitleWriter
 {
+    /// <summary>
+    /// Every highlighted word stays on screen at least this long - the raw
+    /// per-word time estimates can be a few hundredths of a second on a fast
+    /// line, which is too short to read and too short for the entry animation
+    /// to finish (so the text froze at 82% and looked smaller on those cues).
+    /// </summary>
+    private const double MinKaraokeSliceSeconds = 0.15;
+
     public static void Write(IReadOnlyList<CaptionCue> cues, CaptionSettings settings, int width, int height, string outputPath)
     {
         var sb = new StringBuilder();
@@ -71,7 +79,11 @@ public static class AssSubtitleWriter
         sb.AppendLine("ScriptType: v4.00+");
         sb.AppendLine(FormattableString.Invariant($"PlayResX: {width}"));
         sb.AppendLine(FormattableString.Invariant($"PlayResY: {height}"));
-        sb.AppendLine("WrapStyle: 2");
+        // 0 = libass wraps a line that is too wide onto a second line, balancing
+        // the two. The segmenter groups cues expecting up to two lines
+        // (CaptionSegmentationOptions.MaxLines); "2" (no wrapping) let a wide
+        // 3-word cue run off both screen edges and read as a different size.
+        sb.AppendLine("WrapStyle: 0");
         sb.AppendLine("ScaledBorderAndShadow: yes");
         sb.AppendLine("YCbCr Matrix: TV.709");
         sb.AppendLine();
@@ -116,26 +128,44 @@ public static class AssSubtitleWriter
     private static void AppendPlainCue(StringBuilder sb, CaptionCue cue, CaptionSettings settings, int width, int height)
     {
         var text = Prepare(cue.Text, settings);
-        AppendDialogue(sb, cue.StartSeconds, cue.EndSeconds, EntryTags(settings, width, height) + text);
+        AppendDialogue(sb, cue.StartSeconds, cue.EndSeconds, EntryTags(settings, width, height, cue.EndSeconds - cue.StartSeconds) + text);
     }
 
     private static void AppendKaraokeCue(StringBuilder sb, CaptionCue cue, CaptionSettings settings, int width, int height)
     {
         var primary = ToAssColor(settings.PrimaryColor);
         var highlight = ToAssColor(settings.HighlightColor);
+        var n = cue.Words.Count;
 
-        for (var active = 0; active < cue.Words.Count; active++)
+        // Re-slice the cue into non-overlapping windows, one per word, each at
+        // least MinKaraokeSliceSeconds; the last runs to the cue's end. Fixes
+        // near-zero-length highlight windows on dense lines.
+        var bounds = new double[n + 1];
+        bounds[0] = cue.StartSeconds;
+        var cursor = cue.StartSeconds;
+        for (var i = 0; i < n; i++)
         {
-            var word = cue.Words[active];
+            var natural = i < n - 1 ? cue.Words[i].EndSeconds : cue.EndSeconds;
+            var latest = cue.EndSeconds - MinKaraokeSliceSeconds * (n - 1 - i);
+            var lo = cursor + MinKaraokeSliceSeconds;
+            var end = i == n - 1 ? cue.EndSeconds : Math.Clamp(Math.Max(natural, lo), lo, Math.Max(lo, latest));
+            bounds[i + 1] = end;
+            cursor = end;
+        }
 
+        for (var active = 0; active < n; active++)
+        {
             var line = new StringBuilder();
 
             // The entry animation belongs to the cue, not to each word - only
             // the first slice replays it, otherwise the line would re-pop on
-            // every single word.
-            line.Append(active == 0 ? EntryTags(settings, width, height) : PositionTags(settings, width, height));
+            // every single word. Its duration is capped to the first slice so
+            // short cues still reach full size.
+            line.Append(active == 0
+                ? EntryTags(settings, width, height, bounds[1] - bounds[0])
+                : PositionTags(settings, width, height));
 
-            for (var i = 0; i < cue.Words.Count; i++)
+            for (var i = 0; i < n; i++)
             {
                 if (i > 0)
                 {
@@ -146,21 +176,28 @@ public static class AssSubtitleWriter
                 line.Append(Prepare(cue.Words[i].Text, settings));
             }
 
-            // The final word runs to the cue's end so the cue doesn't blink out
-            // early if its last word's estimated span finished sooner.
-            var end = active == cue.Words.Count - 1 ? cue.EndSeconds : word.EndSeconds;
-            AppendDialogue(sb, word.StartSeconds, end, line.ToString());
+            AppendDialogue(sb, bounds[active], bounds[active + 1], line.ToString());
         }
     }
 
     /// <summary>Position plus entry animation, applied when a cue first appears.</summary>
-    private static string EntryTags(CaptionSettings settings, int width, int height) => settings.Animation switch
+    private static string EntryTags(CaptionSettings settings, int width, int height, double firstWindowSeconds = 1.0) => settings.Animation switch
     {
         CaptionAnimation.FadeIn => PositionTags(settings, width, height) + "{\\fad(140,90)}",
-        CaptionAnimation.PopIn => PositionTags(settings, width, height) + "{\\fscx82\\fscy82\\t(0,110,\\fscx100\\fscy100)}",
+        CaptionAnimation.PopIn => PositionTags(settings, width, height) + PopInTag(firstWindowSeconds),
         CaptionAnimation.SlideUp => SlideUpTags(settings, width, height),
         _ => PositionTags(settings, width, height)
     };
+
+    /// <summary>
+    /// Grow from 82% to 100%, but always finish inside the first display window
+    /// so a brief cue never freezes at the reduced size.
+    /// </summary>
+    private static string PopInTag(double firstWindowSeconds)
+    {
+        var ms = Math.Clamp((int)(firstWindowSeconds * 1000 * 0.55), 40, 110);
+        return FormattableString.Invariant($"{{\\fscx82\\fscy82\\t(0,{ms},\\fscx100\\fscy100)}}");
+    }
 
     /// <summary>
     /// Style alignment/margins already place the text, so nothing is emitted

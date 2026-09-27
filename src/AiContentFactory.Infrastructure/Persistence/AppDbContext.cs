@@ -8,6 +8,7 @@ using AiContentFactory.Domain.Publishing;
 using AiContentFactory.Domain.Qa;
 using AiContentFactory.Domain.Scripts;
 using AiContentFactory.Domain.Storyboards;
+using AiContentFactory.Domain.Stories;
 using Microsoft.EntityFrameworkCore;
 
 namespace AiContentFactory.Infrastructure.Persistence;
@@ -30,6 +31,11 @@ public class AppDbContext : DbContext
     public DbSet<QaScore> QaScores => Set<QaScore>();
     public DbSet<SocialConnection> SocialConnections => Set<SocialConnection>();
     public DbSet<PublishJob> PublishJobs => Set<PublishJob>();
+    public DbSet<Story> Stories => Set<Story>();
+    public DbSet<StoryCharacter> StoryCharacters => Set<StoryCharacter>();
+    public DbSet<StoryLocation> StoryLocations => Set<StoryLocation>();
+    public DbSet<StoryEpisode> StoryEpisodes => Set<StoryEpisode>();
+    public DbSet<StoryState> StoryStates => Set<StoryState>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

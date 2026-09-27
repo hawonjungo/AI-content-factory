@@ -28,6 +28,14 @@ public class PublishJob : BaseEntity
     /// <summary>Space-joined, normalised "#tag #tag" string. Empty when none.</summary>
     public string Hashtags { get; private set; } = string.Empty;
 
+    /// <summary>
+    /// The platform-specific privacy/visibility value chosen at publish time
+    /// (e.g. TikTok's "SELF_ONLY", YouTube's "unlisted"). Null = the platform's
+    /// own default. Interpreted only by that platform's publisher - never
+    /// shared across platforms.
+    /// </summary>
+    public string? Privacy { get; private set; }
+
     /// <summary>Null = publish now. Otherwise the UTC instant the scheduler should run this.</summary>
     public DateTimeOffset? ScheduledAtUtc { get; private set; }
 
@@ -62,7 +70,8 @@ public class PublishJob : BaseEntity
         string title,
         string? caption,
         string? hashtags,
-        DateTimeOffset? scheduledAtUtc)
+        DateTimeOffset? scheduledAtUtc,
+        string? privacy = null)
     {
         if (string.IsNullOrWhiteSpace(videoPath))
         {
@@ -79,6 +88,7 @@ public class PublishJob : BaseEntity
             Caption = (caption ?? string.Empty).Trim(),
             Hashtags = NormalizeHashtags(hashtags),
             ScheduledAtUtc = scheduledAtUtc,
+            Privacy = string.IsNullOrWhiteSpace(privacy) ? null : privacy.Trim(),
             Status = scheduledAtUtc is null ? PublishJobStatus.Pending : PublishJobStatus.Scheduled,
             IdempotencyKey = $"{contentProjectId:N}:{platform}:{videoAssetId:N}"
         };

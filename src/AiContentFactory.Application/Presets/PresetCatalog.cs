@@ -167,56 +167,81 @@ public static class PresetCatalog
             "Điện ảnh tối",
             "Ánh sáng ngược, tương phản cao, tông lạnh - hợp kể chuyện và truyền động lực.",
             "cinematic film still, dramatic low-key lighting, deep shadows, cool teal and amber grade, shallow depth of field, anamorphic lens, 35mm film grain",
-            "flat lighting, oversaturated colors, text, watermark, logo"),
+            "flat lighting, oversaturated colors, text, watermark, logo",
+            ReferenceLookGuidance: "cinematic live-action film look, realistic textures and materials, cool teal and amber color grade, fine 35mm film grain",
+            ReferenceNegativePrompt: "cartoon, anime, illustration, oversaturated colors"),
 
         new StylePreset(
             "photoreal-doc",
             "Tài liệu chân thực",
             "Trông như quay thật bằng máy ảnh - hợp review, lịch sử, danh sách.",
             "photorealistic documentary footage, natural daylight, handheld camera feel, realistic skin texture and materials, neutral color grade, 50mm lens",
-            "illustration, cartoon, cgi look, plastic skin, text, watermark, distorted hands"),
+            "illustration, cartoon, cgi look, plastic skin, text, watermark, distorted hands",
+            ReferenceLookGuidance: "photorealistic, realistic skin texture and materials, neutral color grade",
+            ReferenceNegativePrompt: "illustration, cartoon, cgi look, plastic skin"),
+
+        new StylePreset(
+            "cat-travel-stylized-realism",
+            "Cat-Travel-Stylized-Realism",
+            "Dành riêng cho chuỗi video mèo du lịch (Milo & Mimi): tả thực điện ảnh góc POV/selfie hoặc quay ngang người, mèo đi 2 chân dùng tay như người, luôn đeo phụ kiện du lịch, biểu cảm rạng rỡ dễ thương kiểu viral TikTok/Facebook.",
+            "cinematic stylized realism blended with radiant, charming expressiveness; fluffy, finely detailed fur texture; natural, vibrant, colorful lighting; photorealistic as if shot on a 50mm lens, framed as a first-person POV/selfie-style shot or a side-angle handheld shot. The cat naturally stands and walks upright on its hind legs, using its front paws dexterously like human hands (holding a camera, gripping a scooter/e-bike throttle, waving hello, holding food). Always wearing travel accessories (a backwards baseball cap or a beret, a small crossbody bag). Eyes wide open with curiosity, mouth open in a big bright smile, extremely charming and adorable - like a viral Facebook/TikTok pet video",
+            "flat documentary staging, dull neutral or bored expression, closed mouth, sleepy expression, stiff static pose, cartoon, anime, illustration, plastic skin, text, watermark, distorted hands, extra fingers",
+            ReferenceLookGuidance: "cinematic stylized realism, photorealistic finish, fluffy finely detailed fur texture, natural vibrant colors",
+            ReferenceNegativePrompt: "cartoon, anime, illustration, plastic skin"),
 
         new StylePreset(
             "anime",
             "Anime",
             "Nét vẽ anime hiện đại, màu rực, chuyển động mượt.",
             "modern anime key visual, clean cel shading, vibrant saturated palette, expressive character design, detailed painted background, studio-quality animation",
-            "photorealistic, 3d render, text, watermark, extra fingers"),
+            "photorealistic, 3d render, text, watermark, extra fingers",
+            ReferenceLookGuidance: "modern anime key visual style, clean cel shading, vibrant saturated palette",
+            ReferenceNegativePrompt: "photorealistic, 3d render, live-action photograph"),
 
         new StylePreset(
             "pixar-3d",
             "Hoạt hình 3D",
             "Phong cách 3D dễ thương, ánh sáng mềm - hợp nội dung nhẹ nhàng, giáo dục.",
             "stylized 3d animated film still, soft global illumination, rounded appealing character design, subsurface scattering, warm inviting palette, high quality render",
-            "photorealistic, horror, harsh shadows, text, watermark"),
+            "photorealistic, horror, harsh shadows, text, watermark",
+            ReferenceLookGuidance: "stylized 3d animated film look, rounded appealing character design, subsurface scattering skin and fur materials, warm inviting palette, high quality render",
+            ReferenceNegativePrompt: "photorealistic, live-action photograph"),
 
         new StylePreset(
             "horror-grain",
             "Kinh dị nhiễu hạt",
             "Nhiễu hạt, tối, ám ảnh - dành riêng cho nội dung kinh dị.",
             "found-footage horror still, heavy film grain, desaturated sickly green-grey palette, deep crushed blacks, unsettling negative space, dim practical light sources",
-            "bright cheerful lighting, saturated colors, cartoon, text, watermark"),
+            "bright cheerful lighting, saturated colors, cartoon, text, watermark",
+            ReferenceLookGuidance: "found-footage horror film look, heavy film grain, desaturated sickly green-grey palette",
+            ReferenceNegativePrompt: "cartoon, oversaturated colors"),
 
         new StylePreset(
             "retro-vhs",
             "Retro VHS",
             "Cảm giác băng VHS thập niên 90 - hoài niệm, gây chú ý.",
             "1990s VHS home video aesthetic, scanlines, chromatic aberration, slight tape warping, warm faded colors, low dynamic range, timestamp-free",
-            "modern 4k clarity, clean digital look, text, watermark"),
+            "modern 4k clarity, clean digital look, text, watermark",
+            ReferenceLookGuidance: "1990s VHS home video look, scanlines, chromatic aberration, slight tape warping, warm faded colors, low dynamic range",
+            ReferenceNegativePrompt: "modern 4k clarity, clean digital look"),
 
         new StylePreset(
             "minimal-flat",
             "Đồ hoạ tối giản",
             "Hình khối phẳng, nền sạch - hợp giải thích kiến thức và tài chính.",
             "clean minimal motion-graphic style, flat vector shapes, generous negative space, limited two-accent palette on a light background, crisp geometric composition",
-            "photorealistic, cluttered, gradients, noise, text, watermark"),
+            "photorealistic, cluttered, gradients, noise, text, watermark",
+            ReferenceLookGuidance: "clean minimal motion-graphic style, flat vector shapes, limited two-accent color palette",
+            ReferenceNegativePrompt: "photorealistic, gradients, noise"),
 
         new StylePreset(
             "neon-cyberpunk",
             "Neon cyberpunk",
             "Đèn neon, mưa, thành phố tương lai - rất bắt mắt trên feed.",
             "cyberpunk city at night, neon signage reflections on wet asphalt, volumetric fog, magenta and cyan rim lighting, dense futuristic architecture, cinematic wide shot",
-            "daylight, rural, muted colors, text, watermark")
+            "daylight, rural, muted colors, text, watermark",
+            ReferenceLookGuidance: "cyberpunk aesthetic, magenta and cyan color grade, sleek futuristic materials",
+            ReferenceNegativePrompt: "muted colors, desaturated")
     };
 
     public static IReadOnlyList<VoicePreset> Voices { get; } = new[]
@@ -267,7 +292,47 @@ public static class PresetCatalog
             "Trẻ, sáng, thân thiện - hợp nội dung đời sống.",
             "Leda",
             "Read brightly and casually, friendly and light, like talking to a friend.",
-            VoiceGender.Female)
+            VoiceGender.Female),
+
+        // Free, self-hosted (Kokoro-82M via docker compose profile "free-tts").
+        // English only; the style instruction is ignored (Kokoro cannot be steered).
+        // Kept AFTER the Gemini voices so the gender fallback of a Gemini
+        // project never lands on one of these.
+        new VoicePreset(
+            "free-en-female-us",
+            "🆓 Nữ Mỹ (miễn phí)",
+            "Kokoro chạy trên máy bạn - $0, chỉ tiếng Anh.",
+            "kokoro:af_heart",
+            string.Empty,
+            VoiceGender.Female,
+            IsFree: true),
+
+        new VoicePreset(
+            "free-en-male-us",
+            "🆓 Nam Mỹ (miễn phí)",
+            "Kokoro chạy trên máy bạn - $0, chỉ tiếng Anh.",
+            "kokoro:am_michael",
+            string.Empty,
+            VoiceGender.Male,
+            IsFree: true),
+
+        new VoicePreset(
+            "free-en-female-gb",
+            "🆓 Nữ Anh (miễn phí)",
+            "Kokoro chạy trên máy bạn - $0, chỉ tiếng Anh.",
+            "kokoro:bf_emma",
+            string.Empty,
+            VoiceGender.Female,
+            IsFree: true),
+
+        new VoicePreset(
+            "free-en-male-gb",
+            "🆓 Nam Anh (miễn phí)",
+            "Kokoro chạy trên máy bạn - $0, chỉ tiếng Anh.",
+            "kokoro:bm_george",
+            string.Empty,
+            VoiceGender.Male,
+            IsFree: true)
     };
 
     public static IReadOnlyList<CaptionPreset> Captions { get; } = new[]
@@ -340,7 +405,7 @@ public static class PresetCatalog
 
     /// <summary>First catalog voice with the given gender, or null if none is tagged that way.</summary>
     public static VoicePreset? FindVoiceByGender(VoiceGender gender) =>
-        gender == VoiceGender.Unspecified ? null : Voices.FirstOrDefault(v => v.Gender == gender);
+        gender == VoiceGender.Unspecified ? null : Voices.FirstOrDefault(v => v.Gender == gender && !v.IsFree);
 
     /// <summary>
     /// Resolves the voice to speak in: the named preset if it exists and either
@@ -361,7 +426,13 @@ public static class PresetCatalog
             return byId;
         }
 
-        return FindVoiceByGender(preferredGender) ?? byId ?? FindVoice(FallbackVoiceId)!;
+        // Stay in the chosen voice's family: a free voice must never turn into
+        // a paid one (or the other way round) just because of a gender switch.
+        var sameFamily = byId is null
+            ? null
+            : Voices.FirstOrDefault(v => v.Gender == preferredGender && v.IsFree == byId.IsFree);
+
+        return sameFamily ?? (byId?.IsFree == true ? byId : null) ?? FindVoiceByGender(preferredGender) ?? byId ?? FindVoice(FallbackVoiceId)!;
     }
 
     public static ContentTemplate ResolveTemplate(string? id) => FindTemplate(id) ?? FindTemplate(FallbackTemplateId)!;

@@ -6,6 +6,8 @@ namespace AiContentFactory.IntegrationTests;
 /// <summary>Deterministic script JSON so the pre-Flow steps run without a real LLM.</summary>
 public sealed class FakeLlmProvider : ILlmProvider
 {
+    public bool IsConfigured => true;
+
     public Task<string> GenerateAsync(string systemPrompt, string userPrompt, CancellationToken cancellationToken = default) =>
         Task.FromResult("""
         {"hook":"A stray cat walked into the office and nobody noticed.",
@@ -15,6 +17,14 @@ public sealed class FakeLlmProvider : ILlmProvider
          "payoff":"The round closed that afternoon. The cat got a title.",
          "callToAction":"Follow for more workplace disasters that somehow worked out."}
         """);
+}
+
+/// <summary>Always resolves to the single registered <see cref="ILlmProvider"/>, ignoring task type - these tests don't exercise multi-provider routing, just the pipeline around it.</summary>
+public sealed class PassthroughLlmRouter : ILlmRouter
+{
+    private readonly ILlmProvider _provider;
+    public PassthroughLlmRouter(ILlmProvider provider) => _provider = provider;
+    public ILlmProvider Resolve(LlmTaskType task) => _provider;
 }
 
 public sealed class FakeImageProvider : IImageGenerationProvider

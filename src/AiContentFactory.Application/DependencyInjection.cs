@@ -9,6 +9,8 @@ using AiContentFactory.Application.Presets;
 using AiContentFactory.Application.Qa;
 using AiContentFactory.Application.Rendering;
 using AiContentFactory.Application.Scripts;
+using AiContentFactory.Application.Stories;
+using AiContentFactory.Application.Stories.Continuity;
 using AiContentFactory.Application.Storyboards;
 using AiContentFactory.Application.Tts;
 using AiContentFactory.Application.Wizard;
@@ -21,6 +23,43 @@ public static class DependencyInjection
     public static IServiceCollection AddApplication(this IServiceCollection services)
     {
         services.AddScoped<IContentProjectService, ContentProjectService>();
+
+        // Shared "reserve busy lock, then enqueue" helper used by every
+        // controller action that starts a long-running background job
+        // (ContentProjectsController's script/assets/prompts/render/QA
+        // actions, StoryboardsController's clip-plan auto-chain).
+        services.AddScoped<IProjectJobReservationService, ProjectJobReservationService>();
+
+        services.AddScoped<IStoryService, StoryService>();
+
+        // Story -> ContentProject wiring ("Create Video"/"Open Video" on an
+        // episode) - pure orchestration over the existing pipeline, no new
+        // generation logic.
+        services.AddScoped<IStoryVideoLinkService, StoryVideoLinkService>();
+
+        // Story-level Character/Location reference images - generated once,
+        // reused across every episode via IStoryVideoLinkService's seeding
+        // step. Deterministic prompt composition only, no LLM agent.
+        services.AddScoped<IStoryAssetReferenceService, StoryAssetReferenceService>();
+
+        // In-flight guard (one billable generation/upload per character at a time). Process-local, so a singleton.
+        services.AddSingleton<IStoryReferenceGenerationGate, StoryReferenceGenerationGate>();
+
+        // Resolves the short Story-continuity blurb fed into a scene's
+        // PromptAgentInput.StoryVisualContext when its ContentProject is
+        // Story-linked; null (no-op) for every normal, non-Story project.
+        services.AddScoped<IStoryVisualContextResolver, StoryVisualContextResolver>();
+
+        // Story/Series AI orchestration (Bible -> Episode Outline -> Script ->
+        // Validate -> Finalize) - additive, parallel to the plain-CRUD
+        // IStoryService above. Reuses LlmTaskType.Script (see agent files for
+        // rationale) rather than adding new routing configuration.
+        services.AddScoped<IStoryPlannerAgent, StoryPlannerAgent>();
+        services.AddScoped<IEpisodePlannerAgent, EpisodePlannerAgent>();
+        services.AddScoped<IStoryScriptWriterAgent, StoryScriptWriterAgent>();
+        services.AddScoped<IStoryContinuityAnalysisAgent, StoryContinuityAnalysisAgent>();
+        services.AddScoped<IContinuityValidatorAgent, ContinuityValidatorAgent>();
+        services.AddScoped<IStoryContinuityManager, StoryContinuityManager>();
         services.AddScoped<IScriptService, ScriptService>();
         services.AddScoped<IStoryboardService, StoryboardService>();
         services.AddScoped<IAssetService, AssetService>();
@@ -31,9 +70,15 @@ public static class DependencyInjection
         services.AddScoped<IPromptAgent, PromptAgent>();
         services.AddScoped<IContentPipelineService, ContentPipelineService>();
 
+        // Step 2 - AI content idea suggestions (idea-level only, reuses the cheap
+        // text ILlmProvider; no scripts/storyboards are produced here).
+        services.AddScoped<IContentIdeasAgent, ContentIdeasAgent>();
+        services.AddScoped<Ideas.IContentIdeasService, Ideas.ContentIdeasService>();
+
         // Asset references (Character/Environment consistency anchors the user
         // reviews and approves before any clip is generated)
         services.AddScoped<IAssetReferenceService, AssetReferenceService>();
+        services.AddScoped<IAssetReferencePromptAgent, AssetReferencePromptAgent>();
         services.AddScoped<IAssetReferenceGenerationService, AssetReferenceGenerationService>();
 
         // Preset catalog (templates / style / voice / captions)
@@ -64,6 +109,10 @@ public static class DependencyInjection
         services.AddScoped<ITtsService, TtsService>();
 
         services.AddScoped<ISceneAssetGenerator, SceneAssetGenerator>();
+        services.AddScoped<ISceneKeyframeService, SceneKeyframeService>();
+        services.AddScoped<IFlowKeyframeService, FlowKeyframeService>();
+        services.AddScoped<IClipCheckService, ClipCheckService>();
+        services.AddScoped<IStockFootageService, StockFootageService>();
         services.AddScoped<IAssetGenerationService, AssetGenerationService>();
         services.AddScoped<IClipRegenerationService, ClipRegenerationService>();
         services.AddScoped<IGoogleFlowAssetGenerationService, GoogleFlowAssetGenerationService>();

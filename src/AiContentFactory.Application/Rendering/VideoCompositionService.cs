@@ -5,6 +5,10 @@ namespace AiContentFactory.Application.Rendering;
 
 /// <param name="StoryboardSceneCount">Total scenes the storyboard has - used to detect a missing-scene gap.</param>
 /// <param name="ScenesWithVisual">Scenes that had a ready visual asset. Less than the count above = a gap.</param>
+/// <param name="RequireNarration">
+/// False when the Step 6 Voice option is "keep original audio" or "mute" - the
+/// final-video validator then does not treat "no TTS narration" as an error.
+/// </param>
 public record CompositionRequest(
     Guid ContentProjectId,
     Timeline Timeline,
@@ -15,7 +19,8 @@ public record CompositionRequest(
     int ScenesWithVisual,
     int Width = 1080,
     int Height = 1920,
-    int Fps = 30);
+    int Fps = 30,
+    bool RequireNarration = true);
 
 public record CompositionResult(string OutputAbsolutePath, double DurationSeconds, VideoValidationReport Validation);
 
@@ -71,7 +76,8 @@ public class VideoCompositionService : IVideoCompositionService
                 Narration: string.Empty,
                 s.IsStillImage,
                 s.Motion,
-                s.TransitionIn))
+                s.TransitionIn,
+                s.AudioSource))
             .ToList();
 
         var renderRequest = new RenderRequest(
@@ -108,6 +114,7 @@ public class VideoCompositionService : IVideoCompositionService
             ExpectedMinSeconds: Math.Max(HardMinSeconds, timeline.TotalSeconds - DurationToleranceSeconds),
             ExpectedMaxSeconds: Math.Min(HardMaxSeconds, timeline.TotalSeconds + DurationToleranceSeconds),
             NarrationSeconds: narrationSeconds,
+            RequireNarration: request.RequireNarration,
             CaptionsEnabled: request.Captions.Enabled,
             Cues: timeline.AllCues,
             SceneCount: request.StoryboardSceneCount,

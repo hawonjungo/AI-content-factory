@@ -57,6 +57,13 @@ public interface IFlowClipImportService
 {
     Task<FlowClipImportResult> ImportAsync(Guid contentProjectId, Guid sceneId, string fileName, Stream content, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Same validation and scene update as <see cref="ImportAsync"/> for a clip
+    /// that did NOT come from Google Flow (e.g. free stock footage): stored
+    /// under <paramref name="provider"/> and no Flow credits are booked.
+    /// </summary>
+    Task<FlowClipImportResult> ImportExternalAsync(Guid contentProjectId, Guid sceneId, string fileName, Stream content, string provider, CancellationToken cancellationToken = default);
+
     Task<FlowImportStatus> GetStatusAsync(Guid contentProjectId, CancellationToken cancellationToken = default);
 
     /// <summary>
@@ -105,7 +112,14 @@ public class FlowClipImportService : IFlowClipImportService
         _logger = logger;
     }
 
-    public async Task<FlowClipImportResult> ImportAsync(Guid contentProjectId, Guid sceneId, string fileName, Stream content, CancellationToken cancellationToken = default)
+    public Task<FlowClipImportResult> ImportAsync(Guid contentProjectId, Guid sceneId, string fileName, Stream content, CancellationToken cancellationToken = default) =>
+        ImportCoreAsync(contentProjectId, sceneId, fileName, content, FlowProvider, bookFlowCredits: true, cancellationToken);
+
+    public Task<FlowClipImportResult> ImportExternalAsync(Guid contentProjectId, Guid sceneId, string fileName, Stream content, string provider, CancellationToken cancellationToken = default) =>
+        ImportCoreAsync(contentProjectId, sceneId, fileName, content, provider, bookFlowCredits: false, cancellationToken);
+
+    private async Task<FlowClipImportResult> ImportCoreAsync(
+        Guid contentProjectId, Guid sceneId, string fileName, Stream content, string provider, bool bookFlowCredits, CancellationToken cancellationToken)
     {
         var extension = Path.GetExtension(fileName).ToLowerInvariant();
         if (!AllowedExtensions.Contains(extension))
@@ -171,7 +185,7 @@ public class FlowClipImportService : IFlowClipImportService
 
         var asset = await _assetService.CreateAsync(
             contentProjectId,
-            new CreateAssetRequest(sceneId, AssetType.Video, FlowProvider, Path.GetFileName(fileName), storedPath, media.DurationSeconds, media.Width, media.Height),
+            new CreateAssetRequest(sceneId, AssetType.Video, provider, Path.GetFileName(fileName), storedPath, media.DurationSeconds, media.Width, media.Height),
             cancellationToken);
 
         scene.MarkGenerated();
@@ -180,13 +194,17 @@ public class FlowClipImportService : IFlowClipImportService
         scene.SetSkipGeneration(true);
         await _storyboardRepository.SaveChangesAsync(cancellationToken);
 
-        // Book the Flow credits this clip cost, so used/remaining reflect reality.
-        var tier = Enum.TryParse<VideoModelTier>(scene.ModelTier, ignoreCase: true, out var t) ? t : VideoModelTier.Lite;
-        await _creditLedger.RecordExternalCompletionAsync(
-            new CreditReservationRequest(contentProjectId, sceneId, GenerationKind.Video, FlowProvider, "google-flow", tier),
-            _costs.VideoCreditsFor(tier),
-            asset.Id,
-            cancellationToken);
+        // Book the Flow credits this clip cost, so used/remaining reflect reality
+        // (never for a clip that did not come from Flow).
+        if (bookFlowCredits)
+        {
+            var tier = Enum.TryParse<VideoModelTier>(scene.ModelTier, ignoreCase: true, out var t) ? t : VideoModelTier.Lite;
+            await _creditLedger.RecordExternalCompletionAsync(
+                new CreditReservationRequest(contentProjectId, sceneId, GenerationKind.Video, FlowProvider, "google-flow", tier),
+                _costs.VideoCreditsFor(tier),
+                asset.Id,
+                cancellationToken);
+        }
 
         _logger.LogInformation(
             "Imported Flow clip for scene {SceneNumber} ({SceneId}): {Duration:0.0}s {W}x{H}",

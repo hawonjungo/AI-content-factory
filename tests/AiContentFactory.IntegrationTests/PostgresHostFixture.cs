@@ -5,6 +5,7 @@ using AiContentFactory.Application.ContentProjects;
 using AiContentFactory.Application.Costs;
 using AiContentFactory.Application.Generation;
 using AiContentFactory.Application.Providers;
+using AiContentFactory.Application.Publishing;
 using AiContentFactory.Application.Qa;
 using AiContentFactory.Application.Rendering;
 using AiContentFactory.Application.Scripts;
@@ -68,6 +69,8 @@ public sealed class PostgresHostFixture : IAsyncLifetime
         services.AddScoped<IAiUsageRepository, AiUsageRepository>();
         services.AddScoped<IGenerationAttemptRepository, GenerationAttemptRepository>();
         services.AddScoped<IQaScoreRepository, QaScoreRepository>();
+        services.AddScoped<IPublishJobRepository, PublishJobRepository>();
+        services.AddScoped<AiContentFactory.Application.Stories.IStoryRepository, StoryRepository>();
 
         services.AddSingleton<IFileStorage, LocalFileStorage>();
         services.AddSingleton<IMediaProbe>(Probe);
@@ -90,6 +93,7 @@ public sealed class PostgresHostFixture : IAsyncLifetime
 
         // Fake AI providers - no real LLM / image / Flow calls.
         services.AddScoped<ILlmProvider, FakeLlmProvider>();
+        services.AddScoped<ILlmRouter, PassthroughLlmRouter>();
         services.AddScoped<IImageGenerationProvider, FakeImageProvider>();
         services.AddScoped<IVideoGenerationProvider, FakeVideoProvider>();
         services.AddScoped<ITtsProvider, FakeTtsProvider>();

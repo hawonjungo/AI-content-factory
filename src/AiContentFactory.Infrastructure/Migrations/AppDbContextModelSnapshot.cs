@@ -37,6 +37,10 @@ namespace AiContentFactory.Infrastructure.Migrations
                         .HasMaxLength(1000)
                         .HasColumnType("character varying(1000)");
 
+                    b.Property<string>("Label")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
                     b.Property<string>("Prompt")
                         .HasColumnType("text");
 
@@ -60,6 +64,8 @@ namespace AiContentFactory.Infrastructure.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("ContentProjectId", "Type");
+
+                    b.HasIndex("ContentProjectId", "Type", "Label");
 
                     b.ToTable("asset_references", (string)null);
                 });
@@ -129,6 +135,11 @@ namespace AiContentFactory.Infrastructure.Migrations
                         .IsRequired()
                         .HasMaxLength(10)
                         .HasColumnType("character varying(10)");
+
+                    b.Property<string>("AudioMode")
+                        .IsRequired()
+                        .HasMaxLength(15)
+                        .HasColumnType("character varying(15)");
 
                     b.Property<string>("CaptionPresetId")
                         .HasMaxLength(60)
@@ -371,6 +382,10 @@ namespace AiContentFactory.Infrastructure.Migrations
                         .HasMaxLength(30)
                         .HasColumnType("character varying(30)");
 
+                    b.Property<string>("Privacy")
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
                     b.Property<DateTimeOffset?>("PublishedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
@@ -566,6 +581,297 @@ namespace AiContentFactory.Infrastructure.Migrations
                     b.ToTable("scripts", (string)null);
                 });
 
+            modelBuilder.Entity("AiContentFactory.Domain.Stories.Story", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("AspectRatio")
+                        .IsRequired()
+                        .HasMaxLength(10)
+                        .HasColumnType("character varying(10)");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Language")
+                        .IsRequired()
+                        .HasMaxLength(10)
+                        .HasColumnType("character varying(10)");
+
+                    b.Property<string>("Niche")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("Premise")
+                        .HasColumnType("text");
+
+                    b.Property<string>("StylePresetId")
+                        .HasMaxLength(60)
+                        .HasColumnType("character varying(60)");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("stories", (string)null);
+                });
+
+            modelBuilder.Entity("AiContentFactory.Domain.Stories.StoryCharacter", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("BehaviorProfile")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)")
+                        .HasDefaultValue("None");
+
+                    b.Property<string>("ClothingAndAccessories")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Description")
+                        .HasColumnType("text");
+
+                    b.Property<string>("DistinctiveFeatures")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)")
+                        .HasDefaultValue("Unspecified");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("PendingReferenceImagePath")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<string>("PendingReferenceImagePrompt")
+                        .HasColumnType("text");
+
+                    b.Property<string>("PendingReferenceImageProvider")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<string>("PendingReferenceImageSource")
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)");
+
+                    b.Property<string>("ReferenceImagePath")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<string>("ReferenceImagePrompt")
+                        .HasColumnType("text");
+
+                    b.Property<string>("ReferenceImageProvider")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<string>("ReferenceImageSource")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)")
+                        .HasDefaultValue("Generated");
+
+                    b.Property<string>("ReferenceImageStatus")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<string>("Species")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<Guid>("StoryId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("VisualDescription")
+                        .HasColumnType("text");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("StoryId");
+
+                    b.ToTable("story_characters", (string)null);
+                });
+
+            modelBuilder.Entity("AiContentFactory.Domain.Stories.StoryEpisode", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("ContentProjectId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("EpisodeNumber")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid?>("PreviousEpisodeId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Script")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<Guid>("StoryId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Summary")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ContentProjectId");
+
+                    b.HasIndex("PreviousEpisodeId");
+
+                    b.HasIndex("StoryId", "EpisodeNumber");
+
+                    b.ToTable("story_episodes", (string)null);
+                });
+
+            modelBuilder.Entity("AiContentFactory.Domain.Stories.StoryLocation", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Description")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("ReferenceImagePath")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<string>("ReferenceImagePrompt")
+                        .HasColumnType("text");
+
+                    b.Property<string>("ReferenceImageProvider")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<string>("ReferenceImageStatus")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<Guid>("StoryId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("VisualDescription")
+                        .HasColumnType("text");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("StoryId");
+
+                    b.ToTable("story_locations", (string)null);
+                });
+
+            modelBuilder.Entity("AiContentFactory.Domain.Stories.StoryState", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("CharacterStates")
+                        .HasColumnType("text");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("CurrentLocation")
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)");
+
+                    b.Property<string>("CurrentObjective")
+                        .HasColumnType("text");
+
+                    b.Property<string>("ImportantEventsText")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("KnownFactsText")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("NextPlannedDestination")
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)");
+
+                    b.Property<string>("Notes")
+                        .HasColumnType("text");
+
+                    b.Property<string>("OpenStoryThreadsText")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<Guid>("StoryId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("UnresolvedConflictsText")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("StoryId")
+                        .IsUnique();
+
+                    b.ToTable("story_states", (string)null);
+                });
+
             modelBuilder.Entity("AiContentFactory.Domain.Storyboards.Scene", b =>
                 {
                     b.Property<Guid>("Id")
@@ -594,6 +900,12 @@ namespace AiContentFactory.Infrastructure.Migrations
                     b.Property<string>("CaptionText")
                         .HasColumnType("text");
 
+                    b.Property<bool?>("CharacterOnScreen")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("ClipCheckJson")
+                        .HasColumnType("text");
+
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -603,9 +915,25 @@ namespace AiContentFactory.Infrastructure.Migrations
                     b.Property<string>("GenerationPrompt")
                         .HasColumnType("text");
 
+                    b.Property<Guid?>("KeyframeAssetId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("KeyframeImagePrompt")
+                        .HasColumnType("text");
+
+                    b.Property<string>("KeyframeStatus")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasDefaultValue("None");
+
                     b.Property<string>("ModelTier")
                         .HasMaxLength(20)
                         .HasColumnType("character varying(20)");
+
+                    b.Property<string>("MotionPrompt")
+                        .HasColumnType("text");
 
                     b.Property<string>("Narration")
                         .IsRequired()
@@ -617,8 +945,18 @@ namespace AiContentFactory.Infrastructure.Migrations
                     b.Property<string>("Provider")
                         .HasColumnType("text");
 
+                    b.Property<string>("RelevantReferenceLabelsText")
+                        .HasColumnType("text");
+
                     b.Property<int>("SceneNumber")
                         .HasColumnType("integer");
+
+                    b.Property<string>("ShotSize")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasDefaultValue("Unspecified");
 
                     b.Property<bool>("SkipGeneration")
                         .ValueGeneratedOnAdd()
@@ -869,6 +1207,196 @@ namespace AiContentFactory.Infrastructure.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("AiContentFactory.Domain.Stories.Story", b =>
+                {
+                    b.OwnsOne("AiContentFactory.Domain.Stories.StoryBible", "Bible", b1 =>
+                        {
+                            b1.Property<Guid>("StoryId")
+                                .HasColumnType("uuid");
+
+                            b1.Property<string>("CharacterDefinitions")
+                                .HasColumnType("text");
+
+                            b1.Property<string>("CharacterRelationships")
+                                .HasColumnType("text");
+
+                            b1.Property<string>("Premise")
+                                .HasColumnType("text");
+
+                            b1.Property<string>("RecurringElementsText")
+                                .IsRequired()
+                                .HasColumnType("text");
+
+                            b1.Property<string>("StoryArc")
+                                .HasColumnType("text");
+
+                            b1.Property<string>("StoryConstraintsText")
+                                .IsRequired()
+                                .HasColumnType("text");
+
+                            b1.Property<string>("Tone")
+                                .HasColumnType("text");
+
+                            b1.Property<string>("VisualConsistencyRulesText")
+                                .IsRequired()
+                                .HasColumnType("text");
+
+                            b1.Property<string>("WorldRulesText")
+                                .IsRequired()
+                                .HasColumnType("text");
+
+                            b1.HasKey("StoryId");
+
+                            b1.ToTable("stories");
+
+                            b1.ToJson("Bible");
+
+                            b1.WithOwner()
+                                .HasForeignKey("StoryId");
+                        });
+
+                    b.Navigation("Bible");
+                });
+
+            modelBuilder.Entity("AiContentFactory.Domain.Stories.StoryCharacter", b =>
+                {
+                    b.HasOne("AiContentFactory.Domain.Stories.Story", null)
+                        .WithMany("Characters")
+                        .HasForeignKey("StoryId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("AiContentFactory.Domain.Stories.StoryEpisode", b =>
+                {
+                    b.HasOne("AiContentFactory.Domain.Stories.StoryEpisode", null)
+                        .WithMany()
+                        .HasForeignKey("PreviousEpisodeId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("AiContentFactory.Domain.Stories.Story", null)
+                        .WithMany("Episodes")
+                        .HasForeignKey("StoryId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.OwnsOne("AiContentFactory.Domain.Stories.StoryEpisodeOutline", "Outline", b1 =>
+                        {
+                            b1.Property<Guid>("StoryEpisodeId")
+                                .HasColumnType("uuid");
+
+                            b1.Property<string>("Cliffhanger")
+                                .HasColumnType("text");
+
+                            b1.Property<string>("Conflict")
+                                .HasColumnType("text");
+
+                            b1.Property<string>("ContinuityRequirementsText")
+                                .IsRequired()
+                                .HasColumnType("text");
+
+                            b1.Property<string>("Escalation")
+                                .HasColumnType("text");
+
+                            b1.Property<string>("MajorBeatsText")
+                                .IsRequired()
+                                .HasColumnType("text");
+
+                            b1.Property<string>("Objective")
+                                .HasColumnType("text");
+
+                            b1.Property<string>("Resolution")
+                                .HasColumnType("text");
+
+                            b1.Property<string>("ScenesRequiredText")
+                                .IsRequired()
+                                .HasColumnType("text");
+
+                            b1.Property<string>("Setup")
+                                .HasColumnType("text");
+
+                            b1.Property<string>("Title")
+                                .HasColumnType("text");
+
+                            b1.HasKey("StoryEpisodeId");
+
+                            b1.ToTable("story_episodes");
+
+                            b1.ToJson("Outline");
+
+                            b1.WithOwner()
+                                .HasForeignKey("StoryEpisodeId");
+                        });
+
+                    b.OwnsOne("AiContentFactory.Domain.Stories.StoryStateSnapshot", "StoryStateSnapshot", b1 =>
+                        {
+                            b1.Property<Guid>("StoryEpisodeId")
+                                .HasColumnType("uuid");
+
+                            b1.Property<string>("CharacterStates")
+                                .HasColumnType("text");
+
+                            b1.Property<string>("CurrentLocation")
+                                .HasColumnType("text");
+
+                            b1.Property<string>("CurrentObjective")
+                                .HasColumnType("text");
+
+                            b1.Property<string>("ImportantEventsText")
+                                .IsRequired()
+                                .HasColumnType("text");
+
+                            b1.Property<string>("KnownFactsText")
+                                .IsRequired()
+                                .HasColumnType("text");
+
+                            b1.Property<string>("NextPlannedDestination")
+                                .HasColumnType("text");
+
+                            b1.Property<string>("Notes")
+                                .HasColumnType("text");
+
+                            b1.Property<string>("OpenStoryThreadsText")
+                                .IsRequired()
+                                .HasColumnType("text");
+
+                            b1.Property<string>("UnresolvedConflictsText")
+                                .IsRequired()
+                                .HasColumnType("text");
+
+                            b1.HasKey("StoryEpisodeId");
+
+                            b1.ToTable("story_episodes");
+
+                            b1.ToJson("StoryStateSnapshot");
+
+                            b1.WithOwner()
+                                .HasForeignKey("StoryEpisodeId");
+                        });
+
+                    b.Navigation("Outline");
+
+                    b.Navigation("StoryStateSnapshot");
+                });
+
+            modelBuilder.Entity("AiContentFactory.Domain.Stories.StoryLocation", b =>
+                {
+                    b.HasOne("AiContentFactory.Domain.Stories.Story", null)
+                        .WithMany("Locations")
+                        .HasForeignKey("StoryId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("AiContentFactory.Domain.Stories.StoryState", b =>
+                {
+                    b.HasOne("AiContentFactory.Domain.Stories.Story", null)
+                        .WithOne("State")
+                        .HasForeignKey("AiContentFactory.Domain.Stories.StoryState", "StoryId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("AiContentFactory.Domain.Storyboards.Scene", b =>
                 {
                     b.HasOne("AiContentFactory.Domain.Storyboards.Storyboard", null)
@@ -876,6 +1404,17 @@ namespace AiContentFactory.Infrastructure.Migrations
                         .HasForeignKey("StoryboardId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+                });
+
+            modelBuilder.Entity("AiContentFactory.Domain.Stories.Story", b =>
+                {
+                    b.Navigation("Characters");
+
+                    b.Navigation("Episodes");
+
+                    b.Navigation("Locations");
+
+                    b.Navigation("State");
                 });
 
             modelBuilder.Entity("AiContentFactory.Domain.Storyboards.Storyboard", b =>

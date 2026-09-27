@@ -1,4 +1,5 @@
 using AiContentFactory.Domain.Common;
+using AiContentFactory.Domain.Exceptions;
 
 namespace AiContentFactory.Domain.Storyboards;
 
@@ -43,6 +44,25 @@ public class Scene : BaseEntity
     /// </summary>
     public CameraMovement CameraMovement { get; private set; } = CameraMovement.Unspecified;
 
+    /// <summary>The framing chosen by the prompt agent (or the user). Unspecified = no framing stated in the prompt.</summary>
+    public ShotSize ShotSize { get; private set; } = ShotSize.Unspecified;
+
+    /// <summary>
+    /// Whether a recurring character (a named Story character or the project's
+    /// main character) is actually visible in this shot, as decided from the
+    /// shot's own visual content by the prompt agent. Null = never decided
+    /// (scene prompted before this existed) - callers then fall back to their
+    /// legacy heuristic, so existing scenes behave exactly as before.
+    /// </summary>
+    public bool? CharacterOnScreen { get; private set; }
+
+    /// <summary>
+    /// Serialized result of the latest AI clip check (a billable vision call),
+    /// including the Asset id of the clip it judged - a result is only shown
+    /// while that clip is still the scene's current video. Null = never checked.
+    /// </summary>
+    public string? ClipCheckJson { get; private set; }
+
     public string? VisualStyle { get; private set; }
     public string? GenerationPrompt { get; private set; }
     public string? NegativePrompt { get; private set; }
@@ -78,6 +98,54 @@ public class Scene : BaseEntity
     /// recomputing it every render. Null until narration is generated.
     /// </summary>
     public string? AudioTimingJson { get; private set; }
+
+    /// <summary>
+    /// Newline-joined reference <see cref="AssetReference.Label"/> values
+    /// (character/location names) that this scene's narration/visual
+    /// description was found to reference, for Story-linked projects with
+    /// multiple named references. Use <see cref="RelevantReferenceLabels"/>
+    /// for the split list. Empty/null = "nothing recognized, or not a
+    /// Story-linked project" - unaffected for every existing scene.
+    /// </summary>
+    public string? RelevantReferenceLabelsText { get; private set; }
+
+    /// <summary>The split, deduplicated list backing <see cref="RelevantReferenceLabelsText"/>.</summary>
+    public IReadOnlyList<string> RelevantReferenceLabels =>
+        string.IsNullOrEmpty(RelevantReferenceLabelsText)
+            ? Array.Empty<string>()
+            : RelevantReferenceLabelsText.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+
+    /// <summary>
+    /// Lifecycle of this scene's optional Keyframe - a still image generated
+    /// and approved BEFORE video generation, so identity/composition/lighting
+    /// are locked in and reviewable before spending on an 8s clip. Entirely
+    /// optional: a scene that never generates one simply stays
+    /// <see cref="Storyboards.KeyframeStatus.None"/> and nothing about its
+    /// existing direct-to-video/image generation changes.
+    /// </summary>
+    public KeyframeStatus KeyframeStatus { get; private set; } = KeyframeStatus.None;
+
+    /// <summary>
+    /// FK-less pointer (same tolerant-cross-module-reference pattern used
+    /// elsewhere in this codebase) to the <c>Asset</c> row (Type=Image,
+    /// SceneId=this scene) holding the current Keyframe's bytes. Set by
+    /// <see cref="MarkKeyframeGenerated"/>; a later regeneration overwrites it
+    /// with the new Asset's id once the old one is superseded.
+    /// </summary>
+    public Guid? KeyframeAssetId { get; private set; }
+
+    /// <summary>The prompt used to generate the current Keyframe - character appearance/composition/lighting/style only, never dialogue.</summary>
+    public string? KeyframeImagePrompt { get; private set; }
+
+    /// <summary>
+    /// The prompt used to animate the approved Keyframe into video - camera
+    /// movement, character/object motion, temporal progression. Deliberately
+    /// separate from <see cref="GenerationPrompt"/> (the direct-to-video
+    /// path's own action text) and from <see cref="KeyframeImagePrompt"/> -
+    /// null means "compose one from the scene's existing action text at
+    /// generation time" (see <c>SceneKeyframeService</c>).
+    /// </summary>
+    public string? MotionPrompt { get; private set; }
 
     private Scene()
     {
@@ -156,6 +224,27 @@ public class Scene : BaseEntity
         Touch();
     }
 
+    /// <summary>Sets the framing for this scene.</summary>
+    public void SetShotSize(ShotSize shotSize)
+    {
+        ShotSize = shotSize;
+        Touch();
+    }
+
+    /// <summary>Records whether a recurring character is visible in this shot. Null returns the scene to "not decided".</summary>
+    public void SetCharacterOnScreen(bool? characterOnScreen)
+    {
+        CharacterOnScreen = characterOnScreen;
+        Touch();
+    }
+
+    /// <summary>Stores the latest AI clip check result. Blank clears it.</summary>
+    public void SetClipCheck(string? clipCheckJson)
+    {
+        ClipCheckJson = string.IsNullOrWhiteSpace(clipCheckJson) ? null : clipCheckJson;
+        Touch();
+    }
+
     /// <summary>Returns a scene to the un-generated state - used when its imported clip is removed.</summary>
     public void MarkPending()
     {
@@ -167,6 +256,25 @@ public class Scene : BaseEntity
     public void SetAudioTiming(string? audioTimingJson)
     {
         AudioTimingJson = string.IsNullOrWhiteSpace(audioTimingJson) ? null : audioTimingJson;
+        Touch();
+    }
+
+    /// <summary>
+    /// Records which reference <see cref="AssetReference.Label"/> values
+    /// (character/location names) this scene's narration/visual description
+    /// was found to reference. Trims, drops blanks, de-duplicates
+    /// case-insensitively (keeping first-seen casing/order), then stores the
+    /// result newline-joined. Empty input clears it.
+    /// </summary>
+    public void SetRelevantReferenceLabels(IEnumerable<string> labels)
+    {
+        var normalized = (labels ?? Enumerable.Empty<string>())
+            .Select(l => l?.Trim())
+            .Where(l => !string.IsNullOrEmpty(l))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        RelevantReferenceLabelsText = normalized.Length == 0 ? null : string.Join('\n', normalized);
         Touch();
     }
 
@@ -229,6 +337,56 @@ public class Scene : BaseEntity
     public void MarkFailed()
     {
         Status = SceneStatus.Failed;
+        Touch();
+    }
+
+    /// <summary>Throws if a Keyframe generation is already running - the duplicate-request guard for the keyframe endpoint.</summary>
+    public void MarkKeyframeGenerating()
+    {
+        if (KeyframeStatus == KeyframeStatus.Generating)
+        {
+            throw new DomainException("This scene's Keyframe is already generating.");
+        }
+
+        KeyframeStatus = KeyframeStatus.Generating;
+        Touch();
+    }
+
+    /// <summary>
+    /// Records a freshly generated Keyframe. Demotes any prior Approved status
+    /// back to Generated (unapproved) - a regenerated image must be reviewed
+    /// again before it can anchor a video generation.
+    /// </summary>
+    public void MarkKeyframeGenerated(Guid assetId, string? prompt)
+    {
+        KeyframeAssetId = assetId;
+        KeyframeImagePrompt = prompt;
+        KeyframeStatus = KeyframeStatus.Generated;
+        Touch();
+    }
+
+    public void MarkKeyframeFailed()
+    {
+        KeyframeStatus = KeyframeStatus.Failed;
+        Touch();
+    }
+
+    /// <summary>Approves the current Keyframe so it can be used as a video generation's input image. Throws unless a Keyframe was just generated.</summary>
+    public void ApproveKeyframe()
+    {
+        if (KeyframeStatus != KeyframeStatus.Generated)
+        {
+            throw new DomainException("The Keyframe must be generated before it can be approved.");
+        }
+
+        KeyframeStatus = KeyframeStatus.Approved;
+        Touch();
+    }
+
+    /// <summary>Hand-edited or agent-composed motion prompt for animating the approved Keyframe. Blank clears it (falls back to a composed default at generation time).</summary>
+    public void SetMotionPrompt(string? motionPrompt)
+    {
+        MotionPrompt = string.IsNullOrWhiteSpace(motionPrompt) ? null : motionPrompt.Trim();
         Touch();
     }
 }

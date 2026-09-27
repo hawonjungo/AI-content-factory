@@ -31,6 +31,22 @@ public class GeminiOptions
 
     public int TimeoutSeconds { get; set; } = 60;
 
+    /// <summary>
+    /// Caps generateContent output length - still a bounded ceiling (an
+    /// unbounded max lets a misbehaving prompt or model run away with cost
+    /// for no functional benefit), but 2048 proved too tight for
+    /// ContinuityValidatorAgent's categorized multi-issue JSON output on a
+    /// multi-episode Story: QA observed responses truncated mid-JSON
+    /// (Gemini finishReason "MAX_TOKENS") once a validation call needed to
+    /// enumerate several issues with detailed messages, causing
+    /// AgentGenerationException on otherwise-correct calls. Raised to give
+    /// that legitimate case headroom; short callers (ideas/hook/script) are
+    /// bounded by their own prompts, not by this ceiling, so raising it
+    /// doesn't change their behavior. Null keeps the model's own default (no
+    /// cap sent).
+    /// </summary>
+    public int? MaxOutputTokens { get; set; } = 4096;
+
     /// <summary>Veo generation is a long-running operation (typically 1-3 minutes even for an 8s clip) - give it much more room than text/image calls.</summary>
     public int VideoTimeoutSeconds { get; set; } = 300;
 }

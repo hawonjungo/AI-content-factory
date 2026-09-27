@@ -20,6 +20,9 @@
     <ProjectReference Include="..\..\src\AiContentFactory.Domain\AiContentFactory.Domain.csproj" />
     <ProjectReference Include="..\..\src\AiContentFactory.Application\AiContentFactory.Application.csproj" />
     <ProjectReference Include="..\..\src\AiContentFactory.Infrastructure\AiContentFactory.Infrastructure.csproj" />
+    <!-- Needed only to unit-test StoryboardsController's clip-plan auto-chain
+         (controller instances are constructed directly, no WebApplicationFactory/hosting involved). -->
+    <ProjectReference Include="..\..\src\AiContentFactory.Api\AiContentFactory.Api.csproj" />
   </ItemGroup>
 
 </Project>

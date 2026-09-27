@@ -64,6 +64,14 @@ public class ContentProject : BaseEntity
 
     public CaptionSettings Captions { get; private set; } = CaptionSettings.Default();
 
+    /// <summary>
+    /// Step 6 audio handling. New projects default to <see cref="Domain.ContentProjects.AudioMode.Smart"/>
+    /// (per clip: keep original audio where present, TTS only for the gaps);
+    /// projects that predate the feature were migrated to
+    /// <see cref="Domain.ContentProjects.AudioMode.Generated"/> so their behaviour did not change.
+    /// </summary>
+    public AudioMode AudioMode { get; private set; } = AudioMode.Smart;
+
     /// <summary>Step 2 idea configuration (narrative direction, voice, credit strategy). jsonb column.</summary>
     public ContentIdeaConfig IdeaConfig { get; private set; } = ContentIdeaConfig.Default();
 
@@ -149,6 +157,20 @@ public class ContentProject : BaseEntity
     public void UpdateCaptions(CaptionSettings captions)
     {
         Captions = captions ?? throw new DomainException("Caption settings are required.");
+        Touch();
+    }
+
+    /// <summary>Sets the Step 6 audio source (keep original clip audio, generate a new voice-over, or mute).</summary>
+    public void SetAudioMode(AudioMode audioMode)
+    {
+        AudioMode = audioMode;
+        Touch();
+    }
+
+    /// <summary>Picks the narration voice preset. Null / blank clears it back to "use the template's default".</summary>
+    public void SetVoicePreset(string? voicePresetId)
+    {
+        VoicePresetId = Normalize(voicePresetId);
         Touch();
     }
 

@@ -9,6 +9,7 @@ using AiContentFactory.Application.Qa;
 using AiContentFactory.Application.Rendering;
 using AiContentFactory.Application.Scripts;
 using AiContentFactory.Application.Storage;
+using AiContentFactory.Application.Stories;
 using AiContentFactory.Application.Storyboards;
 using AiContentFactory.Application.Publishing;
 using AiContentFactory.Infrastructure.Jobs;
@@ -16,6 +17,7 @@ using AiContentFactory.Infrastructure.Persistence;
 using AiContentFactory.Infrastructure.Persistence.Repositories;
 using AiContentFactory.Infrastructure.Providers;
 using AiContentFactory.Infrastructure.Providers.Gemini;
+using AiContentFactory.Infrastructure.Providers.Groq;
 using AiContentFactory.Infrastructure.Providers.Publishing;
 using AiContentFactory.Infrastructure.Publishing;
 using AiContentFactory.Infrastructure.Rendering;
@@ -40,6 +42,7 @@ public static class DependencyInjection
         services.AddDbContext<AppDbContext>(options => options.UseNpgsql(connectionString));
 
         services.AddScoped<IContentProjectRepository, ContentProjectRepository>();
+        services.AddScoped<IStoryRepository, StoryRepository>();
         services.AddScoped<IScriptRepository, ScriptRepository>();
         services.AddScoped<IStoryboardRepository, StoryboardRepository>();
         services.AddScoped<IAssetRepository, AssetRepository>();
@@ -68,6 +71,8 @@ public static class DependencyInjection
         services.Configure<YouTubePublishOptions>(configuration.GetSection(YouTubePublishOptions.SectionName));
         services.Configure<InstagramPublishOptions>(configuration.GetSection(InstagramPublishOptions.SectionName));
         services.Configure<FacebookPublishOptions>(configuration.GetSection(FacebookPublishOptions.SectionName));
+        services.Configure<GroqOptions>(configuration.GetSection(GroqOptions.SectionName));
+        services.Configure<LlmRoutingOptions>(configuration.GetSection(LlmRoutingOptions.SectionName));
 
         // Storage
         services.AddSingleton<IFileStorage, LocalFileStorage>();
@@ -79,16 +84,59 @@ public static class DependencyInjection
             var options = configuration.GetSection(GeminiOptions.SectionName).Get<GeminiOptions>() ?? new GeminiOptions();
             client.Timeout = TimeSpan.FromSeconds(options.TimeoutSeconds);
         });
+        // Same concrete class, registered again under its own type so ILlmRouter
+        // can depend on a specific provider (via the keyed registrations below)
+        // instead of "whichever ILlmProvider DI happens to hand out" - every
+        // other agent keeps using the ILlmProvider registration above unchanged.
+        services.AddHttpClient<GeminiLlmProvider>((sp, client) =>
+        {
+            var options = configuration.GetSection(GeminiOptions.SectionName).Get<GeminiOptions>() ?? new GeminiOptions();
+            client.Timeout = TimeSpan.FromSeconds(options.TimeoutSeconds);
+        });
+        // Billable multimodal "look at these frames" call for the AI clip check.
+        services.AddHttpClient<IVisionReviewProvider, GeminiVisionReviewProvider>((sp, client) =>
+        {
+            var options = configuration.GetSection(GeminiOptions.SectionName).Get<GeminiOptions>() ?? new GeminiOptions();
+            client.Timeout = TimeSpan.FromSeconds(options.TimeoutSeconds);
+        });
+        // Optional low-cost/fast provider for ILlmRouter - inert (IsConfigured
+        // false) until Llm:Groq:ApiKey is set, so this is a no-op for anyone who
+        // hasn't opted in.
+        services.AddHttpClient<GroqLlmProvider>((sp, client) =>
+        {
+            var options = configuration.GetSection(GroqOptions.SectionName).Get<GroqOptions>() ?? new GroqOptions();
+            client.Timeout = TimeSpan.FromSeconds(options.TimeoutSeconds);
+        });
+        services.AddKeyedScoped<ILlmProvider>(LlmProviderKeys.Gemini, (sp, _) => sp.GetRequiredService<GeminiLlmProvider>());
+        services.AddKeyedScoped<ILlmProvider>(LlmProviderKeys.Groq, (sp, _) => sp.GetRequiredService<GroqLlmProvider>());
+        services.AddScoped<ILlmRouter, LlmRouter>();
         services.AddHttpClient<AiContentFactory.Application.Providers.IImageGenerationProvider, GeminiImageProvider>((sp, client) =>
         {
             var options = configuration.GetSection(GeminiOptions.SectionName).Get<GeminiOptions>() ?? new GeminiOptions();
             client.Timeout = TimeSpan.FromSeconds(options.TimeoutSeconds);
         });
-        services.AddHttpClient<ITtsProvider, GeminiTtsProvider>((sp, client) =>
+        services.AddHttpClient<GeminiTtsProvider>((sp, client) =>
         {
             var options = configuration.GetSection(GeminiOptions.SectionName).Get<GeminiOptions>() ?? new GeminiOptions();
             client.Timeout = TimeSpan.FromSeconds(options.TimeoutSeconds);
         });
+        // Free self-hosted voices (Kokoro). Inert until Tts:Kokoro:BaseUrl is set.
+        services.Configure<Providers.Kokoro.KokoroOptions>(configuration.GetSection(Providers.Kokoro.KokoroOptions.SectionName));
+        services.AddHttpClient<Providers.Kokoro.KokoroTtsProvider>((sp, client) =>
+        {
+            var options = configuration.GetSection(Providers.Kokoro.KokoroOptions.SectionName).Get<Providers.Kokoro.KokoroOptions>() ?? new Providers.Kokoro.KokoroOptions();
+            client.Timeout = TimeSpan.FromSeconds(options.TimeoutSeconds);
+        });
+        services.AddScoped<ITtsProvider, Providers.Kokoro.RoutingTtsProvider>();
+        // Free stock footage (Pexels). Inert until Stock:Pexels:ApiKey is set.
+        services.Configure<Providers.Pexels.PexelsOptions>(configuration.GetSection(Providers.Pexels.PexelsOptions.SectionName));
+        services.AddHttpClient<IStockFootageProvider, Providers.Pexels.PexelsStockFootageProvider>((sp, client) =>
+        {
+            var options = configuration.GetSection(Providers.Pexels.PexelsOptions.SectionName).Get<Providers.Pexels.PexelsOptions>() ?? new Providers.Pexels.PexelsOptions();
+            client.Timeout = TimeSpan.FromSeconds(options.TimeoutSeconds);
+        })
+        // Downloads are only allowed to pexels.com; a redirect must never take them elsewhere.
+        .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
         services.AddHttpClient<IVideoGenerationProvider, VeoVideoProvider>((sp, client) =>
         {
             var options = configuration.GetSection(GeminiOptions.SectionName).Get<GeminiOptions>() ?? new GeminiOptions();
@@ -124,6 +172,7 @@ public static class DependencyInjection
         // Video rendering + probing
         services.AddScoped<IVideoRenderer, FfmpegVideoRenderer>();
         services.AddScoped<IMediaProbe, FfprobeMediaProbe>();
+        services.AddScoped<IVideoFrameExtractor, FfmpegFrameExtractor>();
 
         // Step 7 - social publishing. Token encryption + the Hangfire seam are
         // Infrastructure concerns; each provider gets its own HttpClient with a

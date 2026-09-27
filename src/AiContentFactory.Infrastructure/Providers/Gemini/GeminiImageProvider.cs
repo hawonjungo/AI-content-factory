@@ -88,7 +88,36 @@ public class GeminiImageProvider : AppImageGenerationProvider
         }
 
         using var doc = JsonDocument.Parse(responseBody);
-        var parts = doc.RootElement.GetProperty("candidates")[0].GetProperty("content").GetProperty("parts");
+
+        if (!doc.RootElement.TryGetProperty("candidates", out var candidates) || candidates.GetArrayLength() == 0)
+        {
+            // No candidates at all usually means the request itself was blocked
+            // before generation started - promptFeedback carries the reason.
+            var feedback = doc.RootElement.TryGetProperty("promptFeedback", out var pf) ? pf.ToString() : "no promptFeedback in response";
+            throw new InvalidOperationException($"Gemini image API returned no candidates (blockReason/promptFeedback: {feedback}). Raw response: {Truncate(responseBody, 500)}");
+        }
+
+        var firstCandidate = candidates[0];
+
+        // A candidate can finish without ever producing a "content" object (e.g.
+        // blocked mid-generation) - check finishReason before assuming content
+        // exists, same discipline GeminiLlmProvider already applies to text
+        // generation. Without this, a block surfaced as an opaque
+        // KeyNotFoundException from GetProperty("content") instead of a
+        // diagnosable message.
+        if (firstCandidate.TryGetProperty("finishReason", out var finishReasonEl))
+        {
+            var finishReason = finishReasonEl.GetString();
+            if (finishReason is not (null or "STOP") && !firstCandidate.TryGetProperty("content", out _))
+            {
+                throw new InvalidOperationException($"Gemini image generation did not produce content (finishReason: {finishReason}). This usually means a safety/content filter blocked the request - try a less sensitive prompt. Raw response: {Truncate(responseBody, 500)}");
+            }
+        }
+
+        if (!firstCandidate.TryGetProperty("content", out var contentEl) || !contentEl.TryGetProperty("parts", out var parts))
+        {
+            throw new InvalidOperationException($"Gemini image response had no content/parts. Raw response: {Truncate(responseBody, 500)}");
+        }
 
         foreach (var part in parts.EnumerateArray())
         {
@@ -101,7 +130,7 @@ public class GeminiImageProvider : AppImageGenerationProvider
             }
         }
 
-        throw new InvalidOperationException("Gemini image response contained no image data - it may have returned text instead (check for a content policy refusal).");
+        throw new InvalidOperationException($"Gemini image response contained no image data - it returned text instead (check for a content policy refusal). Raw response: {Truncate(responseBody, 500)}");
     }
 
     private static string Truncate(string value, int maxLength) => value.Length <= maxLength ? value : value[..maxLength] + "...";

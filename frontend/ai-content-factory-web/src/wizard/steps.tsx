@@ -1,43 +1,51 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   apiUrl,
   clipPlanApi,
   contentProjectsApi,
+  describeApiError,
   pipelineApi,
   scriptApi,
+  storyboardApi,
   wizardApi,
   type ClipPlanStrategy,
   type CreditStrategyName,
+  type FlowGenerationPlan,
   type GenerationEstimate,
   type IdeaConfig,
   type PresetCatalog,
   type ProjectOverview,
   type UpsertScriptInput,
-  type VoiceGenderName,
   type WizardStepName,
 } from "../api/client";
+import type { ContentIdeaSuggestion } from "../api/client";
+import { AudioModeSelector } from "./AudioModeSelector";
+import { VoiceSettings } from "./VoiceSettings";
 import { CaptionEditor } from "./CaptionEditor";
 import { ClipCard } from "./ClipCard";
-import { ClipPlanEditor } from "./ClipPlanEditor";
+import { ContentIdeaSuggestions } from "./ContentIdeaSuggestions";
 import { FlowImportPanel } from "./FlowImportPanel";
-import { FlowPlanPanel } from "./FlowPlanPanel";
+import { ScenePlanPanel } from "./ScenePlanPanel";
 import { PublishPanel } from "./PublishPanel";
 import {
   AttemptsPanel,
   Blockers,
   CompositionStatusPanel,
   CostEstimate,
+  CostNote,
   CreditPanel,
   Field,
   PresetPicker,
+  StatusBadge,
   ValidationList,
   formatDuration,
+  formatUsdEstimate,
+  usePricing,
 } from "./components";
 
 const STORY_TYPES = ["Kể chuyện", "Case study", "Phản biện / bóc phốt", "Hướng dẫn", "Danh sách", "So sánh", "Giải thích"];
 const HOOK_STYLES = ["Câu hỏi sốc", "Con số gây sốc", "Tuyên bố táo bạo", "Nghịch lý", "Bí ẩn mở màn"];
 const EMOTIONS = ["Tò mò", "Kinh ngạc", "Căng thẳng", "Ấm áp", "Hài hước", "Truyền cảm hứng"];
-const VOICE_STYLES = ["Tự nhiên", "Điềm tĩnh", "Năng lượng cao", "Kịch tính", "Thì thầm", "Ấm áp"];
 const CREDIT_STRATEGIES: { value: CreditStrategyName; label: string; hint: string }[] = [
   { value: "Balanced", label: "Cân bằng", hint: "1 clip Fast cho hook + các beat mạnh trong ngân sách (20+10+10+10)." },
   { value: "MaxImpact", label: "Tối đa hình ảnh", hint: "Dùng hết ngân sách cho video ở mọi cảnh có thể." },
@@ -53,6 +61,8 @@ export interface StepProps {
   onJobStarted: () => void;
   onGoTo: (step: WizardStepName) => void;
   onError: (message: string | null) => void;
+  /** Reports whether this step currently has unsaved edits, so leaving the step (nav or a "continue" button) can warn before discarding them. Optional - only steps with their own local draft state need to call it. */
+  onDirtyChange?: (dirty: boolean) => void;
 }
 
 // --------------------------------------------------------------------------
@@ -67,7 +77,7 @@ export function TemplateStep({ overview, catalog, busy, onRefresh, onGoTo, onErr
       await wizardApi.applyPresets(overview.id, patch);
       onRefresh();
     } catch (err) {
-      onError(err instanceof Error ? err.message : "Không lưu được lựa chọn.");
+      onError(describeApiError(err, "Không lưu được lựa chọn."));
     } finally {
       setSaving(false);
     }
@@ -138,42 +148,84 @@ export function TemplateStep({ overview, catalog, busy, onRefresh, onGoTo, onErr
 
 const EMPTY_IDEA: IdeaConfig = {};
 
-export function IdeaStep({ overview, catalog, busy, onRefresh, onJobStarted, onGoTo, onError }: StepProps) {
+/** The fields IdeaStep tracks locally, in the shape used to detect unsaved edits. */
+interface IdeaDraftSnapshot {
+  title: string;
+  topic: string;
+  niche: string;
+  duration: number;
+  idea: IdeaConfig;
+}
+
+function ideaSnapshotFrom(overview: ProjectOverview): IdeaDraftSnapshot {
+  return {
+    title: overview.title,
+    topic: overview.topic ?? "",
+    niche: overview.niche ?? "",
+    duration: overview.targetDurationSeconds,
+    idea: overview.ideaConfig ?? EMPTY_IDEA,
+  };
+}
+
+export function IdeaStep({ overview, busy, onRefresh, onJobStarted, onGoTo, onError, onDirtyChange }: StepProps) {
   const [title, setTitle] = useState(overview.title);
   const [topic, setTopic] = useState(overview.topic ?? "");
   const [niche, setNiche] = useState(overview.niche ?? "");
   const [duration, setDuration] = useState(overview.targetDurationSeconds);
   const [idea, setIdea] = useState<IdeaConfig>(overview.ideaConfig ?? EMPTY_IDEA);
-  const [voiceId, setVoiceId] = useState<string | null>(overview.presets.voicePresetId ?? null);
   const [submitting, setSubmitting] = useState<null | "save" | "generate">(null);
 
+  // What's actually saved server-side right now - compared against the fields
+  // above to know whether there are unsaved edits. Kept separate from
+  // `overview` itself because `overview` only catches up asynchronously after
+  // a save (see persist()), which would otherwise make a just-saved form look
+  // dirty for one extra render.
+  const [saved, setSaved] = useState<IdeaDraftSnapshot>(() => ideaSnapshotFrom(overview));
+
   useEffect(() => {
-    setTitle(overview.title);
-    setTopic(overview.topic ?? "");
-    setNiche(overview.niche ?? "");
-    setDuration(overview.targetDurationSeconds);
-    setIdea(overview.ideaConfig ?? EMPTY_IDEA);
-    setVoiceId(overview.presets.voicePresetId ?? null);
+    const snapshot = ideaSnapshotFrom(overview);
+    setTitle(snapshot.title);
+    setTopic(snapshot.topic);
+    setNiche(snapshot.niche);
+    setDuration(snapshot.duration);
+    setIdea(snapshot.idea);
+    setSaved(snapshot);
   }, [overview.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const gender: VoiceGenderName = idea.voiceGender ?? "Unspecified";
-  const voicesForGender = catalog.voices.filter(
-    (v) => gender === "Unspecified" || v.gender === gender || v.gender === "Unspecified",
-  );
+  const dirty =
+    title !== saved.title ||
+    topic !== saved.topic ||
+    niche !== saved.niche ||
+    duration !== saved.duration ||
+    JSON.stringify(idea) !== JSON.stringify(saved.idea);
+
+  useEffect(() => {
+    onDirtyChange?.(dirty);
+  }, [dirty, onDirtyChange]);
 
   const patchIdea = (p: Partial<IdeaConfig>) => setIdea((cur) => ({ ...cur, ...p }));
 
   const persist = async () => {
-    await contentProjectsApi.update(overview.id, {
+    const snapshot: IdeaDraftSnapshot = {
       title: title.trim(),
-      topic: topic.trim() || undefined,
-      niche: niche.trim() || undefined,
-      targetDurationSeconds: duration,
-      ideaConfig: idea,
+      topic: topic.trim(),
+      niche: niche.trim(),
+      duration,
+      idea,
+    };
+    await contentProjectsApi.update(overview.id, {
+      title: snapshot.title,
+      topic: snapshot.topic || undefined,
+      niche: snapshot.niche || undefined,
+      targetDurationSeconds: snapshot.duration,
+      ideaConfig: snapshot.idea,
     });
-    if (voiceId && voiceId !== overview.presets.voicePresetId) {
-      await wizardApi.applyPresets(overview.id, { voicePresetId: voiceId });
-    }
+    setSaved(snapshot);
+    // Tell the parent immediately rather than waiting for the `dirty`-tracking
+    // effect above to run on the next render - handleGenerate calls onGoTo
+    // right after persist() resolves, in the same tick, and the parent's
+    // guard must see "clean" by then or it will show a needless confirm.
+    onDirtyChange?.(false);
   };
 
   const handleSave = async () => {
@@ -183,7 +235,7 @@ export function IdeaStep({ overview, catalog, busy, onRefresh, onJobStarted, onG
       await persist();
       onRefresh();
     } catch (err) {
-      onError(err instanceof Error ? err.message : "Không lưu được cấu hình.");
+      onError(describeApiError(err, "Không lưu được cấu hình."));
     } finally {
       setSubmitting(null);
     }
@@ -199,7 +251,7 @@ export function IdeaStep({ overview, catalog, busy, onRefresh, onJobStarted, onG
       onGoTo("Script");
       onRefresh();
     } catch (err) {
-      onError(err instanceof Error ? err.message : "Không tạo được kịch bản.");
+      onError(describeApiError(err, "Không tạo được kịch bản."));
     } finally {
       setSubmitting(null);
     }
@@ -207,10 +259,33 @@ export function IdeaStep({ overview, catalog, busy, onRefresh, onJobStarted, onG
 
   const disabled = busy || submitting !== null;
 
+  // Drops an AI-suggested idea into the normal Step 2 fields. From here on it is
+  // just a user-entered idea - the existing save / generate flow is unchanged.
+  const useSuggestedIdea = (suggestion: ContentIdeaSuggestion) => {
+    onError(null);
+    setTitle(suggestion.title);
+    setNiche(suggestion.niche);
+    setTopic(
+      suggestion.hook.trim()
+        ? `${suggestion.concept.trim()}\n\nMở đầu gợi ý: ${suggestion.hook.trim()}`
+        : suggestion.concept.trim(),
+    );
+  };
+
+  const existingIdeaHints = [title, topic].map((s) => s.trim()).filter((s) => s.length > 0);
+
   return (
     <section className="wz-card">
       <h2>Ý tưởng video</h2>
       <p className="wz-sub">Càng cụ thể thì kịch bản càng sắc. Một câu mô tả rõ ràng tốt hơn một từ khoá chung chung.</p>
+
+      <ContentIdeaSuggestions
+        language={overview.language}
+        durationSeconds={duration}
+        existingIdeas={existingIdeaHints}
+        disabled={disabled}
+        onUseIdea={useSuggestedIdea}
+      />
 
       <Field label="Tiêu đề">
         <input type="text" value={title} onChange={(e) => setTitle(e.target.value)} />
@@ -285,63 +360,10 @@ export function IdeaStep({ overview, catalog, busy, onRefresh, onJobStarted, onG
         </Field>
       </div>
 
-      <h3>Giọng đọc</h3>
-      <Field label="Giới tính giọng">
-        <div className="wz-radios">
-          {(["Unspecified", "Male", "Female"] as VoiceGenderName[]).map((g) => (
-            <label key={g}>
-              <input
-                type="radio"
-                name="voiceGender"
-                checked={gender === g}
-                onChange={() => patchIdea({ voiceGender: g })}
-              />{" "}
-              {g === "Unspecified" ? "Không chọn" : g === "Male" ? "Nam" : "Nữ"}
-            </label>
-          ))}
-        </div>
-      </Field>
-      <div className="wz-row">
-        <Field label="Giọng cụ thể">
-          <select value={voiceId ?? ""} onChange={(e) => setVoiceId(e.target.value || null)}>
-            <option value="">(theo mẫu)</option>
-            {voicesForGender.map((v) => (
-              <option key={v.id} value={v.id}>
-                {v.name}
-              </option>
-            ))}
-          </select>
-        </Field>
-        <Field label="Phong cách đọc">
-          <select value={idea.voiceStyle ?? ""} onChange={(e) => patchIdea({ voiceStyle: e.target.value || undefined })}>
-            <option value="">(theo giọng)</option>
-            {VOICE_STYLES.map((s) => (
-              <option key={s} value={s}>
-                {s}
-              </option>
-            ))}
-          </select>
-        </Field>
-      </div>
-      <div className="wz-row">
-        <Field label={`Tốc độ nói (${(idea.speakingRate ?? 1).toFixed(2)}×)`} hint="Nếu nhà cung cấp hỗ trợ.">
-          <input
-            type="range"
-            min={0.5}
-            max={1.5}
-            step={0.05}
-            value={idea.speakingRate ?? 1}
-            onChange={(e) => patchIdea({ speakingRate: Number(e.target.value) })}
-          />
-        </Field>
-        <Field label="Ngôn ngữ / giọng vùng" hint="BCP-47, ví dụ vi-VN, en-US. Nếu hỗ trợ.">
-          <input
-            type="text"
-            value={idea.narrationLanguage ?? ""}
-            onChange={(e) => patchIdea({ narrationLanguage: e.target.value || undefined })}
-          />
-        </Field>
-      </div>
+      <p className="wz-hint" style={{ margin: "0 0 4px" }}>
+        🎙️ Giọng đọc, âm thanh và phụ đề chuyển sang <strong>Bước 6 – Dựng video</strong> (đây là thiết lập khi xuất bản,
+        không phải khi lên ý tưởng).
+      </p>
 
       <h3>Chiến lược tín dụng</h3>
       <Field label="Phân bổ credit cho video AI" hint={CREDIT_STRATEGIES.find((s) => s.value === (idea.creditStrategy ?? "Balanced"))?.hint}>
@@ -366,6 +388,7 @@ export function IdeaStep({ overview, catalog, busy, onRefresh, onJobStarted, onG
         >
           {submitting === "generate" ? "Đang gửi..." : overview.script ? "Viết lại kịch bản" : "Viết kịch bản"}
         </button>
+        <CostNote kind="longText">Viết kịch bản bằng AI</CostNote>
         <button type="button" className="wz-btn" disabled={disabled} onClick={handleSave}>
           {submitting === "save" ? "Đang lưu..." : "Lưu cấu hình"}
         </button>
@@ -399,28 +422,45 @@ const EMPTY_SCRIPT: UpsertScriptInput = {
   callToAction: "",
 };
 
-export function ScriptStep({ overview, busy, onRefresh, onJobStarted, onGoTo, onError }: StepProps) {
+export function ScriptStep({ overview, busy, onRefresh, onJobStarted, onGoTo, onError, onDirtyChange }: StepProps) {
   const [draft, setDraft] = useState<UpsertScriptInput>(EMPTY_SCRIPT);
   const [saving, setSaving] = useState(false);
   const [scoring, setScoring] = useState(false);
 
+  // What's actually saved server-side, for the same reason as IdeaStep's
+  // `saved` snapshot: comparing against `overview.script` directly would make
+  // the form look dirty for one extra render right after a save/score, since
+  // `overview` only catches up once onRefresh's fetch resolves.
+  const [saved, setSaved] = useState<UpsertScriptInput>(EMPTY_SCRIPT);
+
   useEffect(() => {
     if (!overview.script) {
       setDraft(EMPTY_SCRIPT);
+      setSaved(EMPTY_SCRIPT);
       return;
     }
     const { hook, introduction, body, escalation, payoff, callToAction } = overview.script;
-    setDraft({ hook, introduction, body, escalation, payoff, callToAction });
+    const next = { hook, introduction, body, escalation, payoff, callToAction };
+    setDraft(next);
+    setSaved(next);
   }, [overview.script]);
+
+  const dirty = JSON.stringify(draft) !== JSON.stringify(saved);
+
+  useEffect(() => {
+    onDirtyChange?.(dirty);
+  }, [dirty, onDirtyChange]);
 
   const handleSave = async () => {
     setSaving(true);
     onError(null);
     try {
       await scriptApi.upsert(overview.id, draft);
+      setSaved(draft);
+      onDirtyChange?.(false);
       onRefresh();
     } catch (err) {
-      onError(err instanceof Error ? err.message : "Không lưu được kịch bản.");
+      onError(describeApiError(err, "Không lưu được kịch bản."));
     } finally {
       setSaving(false);
     }
@@ -431,11 +471,13 @@ export function ScriptStep({ overview, busy, onRefresh, onJobStarted, onGoTo, on
     onError(null);
     try {
       await scriptApi.upsert(overview.id, draft);
+      setSaved(draft);
+      onDirtyChange?.(false);
       await pipelineApi.runQa(overview.id);
       onJobStarted();
       onRefresh();
     } catch (err) {
-      onError(err instanceof Error ? err.message : "Không chấm điểm được kịch bản.");
+      onError(describeApiError(err, "Không chấm điểm được kịch bản."));
     } finally {
       setScoring(false);
     }
@@ -488,6 +530,7 @@ export function ScriptStep({ overview, busy, onRefresh, onJobStarted, onGoTo, on
         <button type="button" className="wz-btn" disabled={disabled} onClick={handleScore}>
           {scoring ? "Đang gửi..." : "Chấm điểm kịch bản"}
         </button>
+        <CostNote kind="longText">Chấm điểm bằng AI</CostNote>
         <button type="button" className="wz-btn wz-btn-primary" disabled={disabled} onClick={() => onGoTo("References")}>
           Tiếp tục
         </button>
@@ -498,19 +541,44 @@ export function ScriptStep({ overview, busy, onRefresh, onJobStarted, onGoTo, on
 
 // --------------------------------------------------------------------------
 
+// Ordered cheapest-first (miễn phí → chi phí thấp → trả phí) so the free option
+// is the default and paid AI video is an explicit opt-in, not the starting point.
 const STRATEGY_OPTIONS: { value: ClipPlanStrategy; label: string; hint: string }[] = [
-  { value: "CostOptimized", label: "Tối ưu chi phí", hint: "Video AI chỉ ở hook + cao trào, còn lại ảnh tĩnh - rẻ hơn nhiều so với toàn video." },
-  { value: "AllVideo", label: "Tất cả là video AI", hint: "Đẹp nhất, tốn nhất." },
-  { value: "AllImages", label: "Tất cả là ảnh tĩnh", hint: "Rẻ nhất - ảnh AI + hiệu ứng zoom nhẹ." },
+  { value: "AllImages", label: "Tất cả là ảnh tĩnh (rẻ nhất)", hint: "Rẻ nhất - ảnh AI + hiệu ứng zoom nhẹ, gần như $0." },
+  { value: "CostOptimized", label: "Tối ưu chi phí (chi phí thấp)", hint: "Video AI chỉ ở hook + cao trào, còn lại ảnh tĩnh - rẻ hơn nhiều so với toàn video." },
+  { value: "AllVideo", label: "Tất cả là video AI (trả phí)", hint: "Đẹp nhất, tốn nhất - chỉ dùng khi thực sự cần." },
 ];
 
 export function GenerateStep({ overview, busy, onRefresh, onJobStarted, onGoTo, onError }: StepProps) {
   const [totalDuration, setTotalDuration] = useState(overview.targetDurationSeconds);
   const [clipDuration, setClipDuration] = useState(8);
-  const [strategy, setStrategy] = useState<ClipPlanStrategy>("CostOptimized");
+  // Default to the free/near-free plan; paid AI video is an opt-in via the select.
+  const [strategy, setStrategy] = useState<ClipPlanStrategy>("AllImages");
   const [autoHook, setAutoHook] = useState(false);
   const [planning, setPlanning] = useState(false);
   const [starting, setStarting] = useState(false);
+  const [suggestingAll, setSuggestingAll] = useState(false);
+  const pricing = usePricing();
+  // Bumped once the bulk "suggest-all" background job's busy state clears, so
+  // ScenePlanPanel refetches the flow plan (its own prompt/rationale fields
+  // aren't in `overview.clips`, so the normal busy-poll refresh alone doesn't
+  // surface the new prompts - see ScenePlanPanel's refreshToken prop).
+  const [scenePlanRefreshToken, setScenePlanRefreshToken] = useState(0);
+  const suggestAllInFlightRef = useRef(false);
+  // Surfaced by ScenePlanPanel's own fetch (see onPlanLoaded) purely so the
+  // sticky action bar can show the same scene counts / Copy All action
+  // without a second request.
+  const [flowPlan, setFlowPlan] = useState<FlowGenerationPlan | null>(null);
+  const [copiedAll, setCopiedAll] = useState(false);
+
+  // Once the bulk suggest-all job we started finishes (project goes back to
+  // idle), trigger ScenePlanPanel's refetch exactly once for that run.
+  useEffect(() => {
+    if (!busy && suggestAllInFlightRef.current) {
+      suggestAllInFlightRef.current = false;
+      setScenePlanRefreshToken((t) => t + 1);
+    }
+  }, [busy]);
 
   // Auto-hook mode writes its own fixed script, so its estimate can't come
   // from the storyboard-based one in `overview`; fetch a mode-specific one.
@@ -552,7 +620,7 @@ export function GenerateStep({ overview, busy, onRefresh, onJobStarted, onGoTo, 
       await clipPlanApi.generate(overview.id, { clipCount, clipDurationSeconds: clipDuration, strategy });
       onRefresh();
     } catch (err) {
-      onError(err instanceof Error ? err.message : "Không chia được clip.");
+      onError(describeApiError(err, "Không chia được clip."));
     } finally {
       setPlanning(false);
     }
@@ -569,15 +637,71 @@ export function GenerateStep({ overview, busy, onRefresh, onJobStarted, onGoTo, 
       onGoTo("Preview");
       onRefresh();
     } catch (err) {
-      onError(err instanceof Error ? err.message : "Không bắt đầu dựng được.");
+      onError(describeApiError(err, "Không bắt đầu dựng được."));
     } finally {
       setStarting(false);
     }
   };
 
-  const disabled = busy || planning || starting;
+  const disabled = busy || planning || starting || suggestingAll;
   const withinBudget = autoHook || overview.credits.withinBudget;
-  const canStart = !disabled && withinBudget && (autoHook || (hasPlan && referencesResolved));
+  // A scene left on "Animation / Motion" (or another type the app can't
+  // auto-generate) is not skip-flagged would make the Veo run throw
+  // mid-batch (SceneAssetGenerator rejects any type other than AiVideo/
+  // AiImage) and abort the whole job, even after earlier paid clips in the
+  // same run already succeeded. Block starting until the user either
+  // changes the scene's type or checks "Đã có video / Bỏ qua Veo API".
+  const hasUnsupportedScene =
+    !autoHook && (flowPlan?.scenes.some((s) => s.generationType === "STATIC" && !s.skipGeneration) ?? false);
+  const canStart =
+    !disabled && withinBudget && (autoHook || (hasPlan && referencesResolved && !hasUnsupportedScene));
+
+  const copyAllPrompts = async () => {
+    if (!flowPlan?.copyAllText) return;
+    try {
+      await navigator.clipboard.writeText(flowPlan.copyAllText);
+      setCopiedAll(true);
+      window.setTimeout(() => setCopiedAll(false), 1500);
+    } catch {
+      onError("Trình duyệt chặn copy - hãy mở danh sách cảnh bên trên và copy thủ công.");
+    }
+  };
+
+  const videoSceneCount = flowPlan?.scenes.filter((s) => s.generationType === "AI_VIDEO" && !s.skipGeneration).length ?? 0;
+  const imageSceneCount = flowPlan?.scenes.filter((s) => s.generationType !== "AI_VIDEO" && !s.skipGeneration).length ?? 0;
+  const unpromptedSceneCount = flowPlan?.scenes.filter((s) => s.isUnprompted).length ?? 0;
+
+  // Bulk-suggests a prompt for every scene that doesn't have one yet - one
+  // billable (text-only) AI call per unprompted scene, run sequentially as a
+  // background job on the server (same ReserveJobAsync "busy" lock as
+  // handleStart/handlePlan's siblings elsewhere in the wizard), so this only
+  // triggers the job and lets the existing progress poll/busy-refresh handle
+  // the rest.
+  const handleSuggestAllPrompts = async (includePrompted = false) => {
+    if (includePrompted) {
+      const count = flowPlan?.scenes.length ?? overview.clips.length;
+      const total = formatUsdEstimate(pricing.textCallUsd * count);
+      const ok = window.confirm(
+        `Gợi ý lại prompt cho TẤT CẢ ${count} cảnh (kể cả cảnh đã có prompt)?\n\n` +
+          `• Chi phí ước tính ≈ ${formatUsdEstimate(pricing.textCallUsd)} × ${count} cảnh ≈ ${total}.\n` +
+          "• Prompt bạn đã tự sửa tay sẽ bị ghi đè.\n" +
+          "• Mỗi cảnh sẽ có cỡ cảnh, góc máy đổi theo cảnh trước, và AI tự xác định cảnh nào có nhân vật.",
+      );
+      if (!ok) return;
+    }
+    setSuggestingAll(true);
+    onError(null);
+    try {
+      await storyboardApi.suggestAllPrompts(overview.id, { includePrompted });
+      suggestAllInFlightRef.current = true;
+      onJobStarted();
+      onRefresh();
+    } catch (err) {
+      onError(describeApiError(err, "Không tạo được gợi ý cho tất cả cảnh."));
+    } finally {
+      setSuggestingAll(false);
+    }
+  };
 
   return (
     <>
@@ -628,24 +752,84 @@ export function GenerateStep({ overview, busy, onRefresh, onJobStarted, onGoTo, 
               {planning ? "Đang chia..." : hasPlan ? "Chia lại" : "Chia clip"}
             </button>
           </div>
-
-          {hasPlan && (
-            <div style={{ marginTop: 16 }}>
-              <ClipPlanEditor
-                contentProjectId={overview.id}
-                clips={overview.clips}
-                disabled={disabled}
-                onChanged={onRefresh}
-              />
-            </div>
-          )}
         </section>
       )}
 
-      {!autoHook && hasPlan && <FlowPlanPanel contentProjectId={overview.id} />}
+      {!autoHook && hasPlan && (
+        <>
+          {/* Primary content - one unified scene list: media-type selector,
+              always-visible narration/prompt copy actions, and an "Advanced"
+              disclosure per card for the Veo-specific controls (model tier via
+              the selector, camera, skip-generation, prompt edit, upload). */}
+          <ScenePlanPanel
+            contentProjectId={overview.id}
+            clips={overview.clips}
+            disabled={disabled}
+            onChanged={onRefresh}
+            onPlanLoaded={setFlowPlan}
+            refreshToken={scenePlanRefreshToken}
+          />
 
-      <section className="wz-card">
-        <h2>Bắt đầu dựng</h2>
+          <div className="wz-sticky-bar">
+            <span className="wz-sticky-bar-summary">
+              {flowPlan
+                ? `${videoSceneCount} Video AI · ${imageSceneCount} Ảnh · ~${formatDuration(estimate.totalSeconds)}`
+                : `${overview.clips.length} cảnh · ~${formatDuration(estimate.totalSeconds)}`}
+            </span>
+            {unpromptedSceneCount > 0 && (
+              <button
+                type="button"
+                className="wz-btn wz-btn-sm"
+                disabled={disabled}
+                onClick={() => handleSuggestAllPrompts()}
+                title="Tạo gợi ý prompt AI cho mọi cảnh còn thiếu prompt - cảnh đã có prompt được giữ nguyên."
+              >
+                {suggestingAll ? "Đang gửi..." : `✨ Tạo gợi ý cho ${unpromptedSceneCount} cảnh còn thiếu`}
+              </button>
+            )}
+            {unpromptedSceneCount > 0 && (
+              <CostNote kind="text" units={unpromptedSceneCount} unitLabel="cảnh">
+                Gợi ý prompt bằng AI
+              </CostNote>
+            )}
+            {flowPlan && flowPlan.scenes.length > 0 && unpromptedSceneCount === 0 && (
+              <>
+                <button
+                  type="button"
+                  className="wz-btn wz-btn-sm"
+                  disabled={disabled}
+                  onClick={() => handleSuggestAllPrompts(true)}
+                  title="Chạy lại gợi ý prompt AI cho mọi cảnh (ghi đè prompt cũ) - dùng cho dự án tạo trước khi có cỡ cảnh / nhận diện nhân vật."
+                >
+                  {suggestingAll ? "Đang gửi..." : `🔁 Gợi ý lại tất cả ${flowPlan.scenes.length} cảnh`}
+                </button>
+                <CostNote kind="text" units={flowPlan.scenes.length} unitLabel="cảnh" />
+              </>
+            )}
+            {flowPlan?.copyAllText && (
+              <button
+                type="button"
+                className="wz-btn wz-btn-sm"
+                onClick={copyAllPrompts}
+                title="Các cảnh chưa có prompt AI sẽ không được copy - văn bản đã copy có ghi chú số cảnh bị bỏ qua ở cuối."
+              >
+                {copiedAll ? "Đã copy ✓" : "📋 Copy tất cả Prompt"}
+              </button>
+            )}
+            <button type="button" className="wz-btn wz-btn-primary wz-btn-sm" onClick={() => onGoTo("Preview")}>
+              Tiếp tục → Bước 6
+            </button>
+          </div>
+        </>
+      )}
+
+      <details className="wz-advanced">
+        <summary>⚡ Dựng tự động bằng Veo API (trả phí, nâng cao)</summary>
+
+        <p className="wz-hint" style={{ marginTop: 0 }}>
+          💡 Miễn phí: dùng Google Flow ở trên thay vì phần này. Phần dưới đây gọi Veo API của Google - tính phí thật
+          theo giây video.
+        </p>
 
         {overview.googleFlowAvailable && (
           <label style={{ display: "block", fontSize: 14, margin: "0 0 12px" }}>
@@ -669,6 +853,14 @@ export function GenerateStep({ overview, busy, onRefresh, onJobStarted, onGoTo, 
           </p>
         )}
 
+        {hasUnsupportedScene && (
+          <p className="wz-error" style={{ marginTop: 8 }}>
+            ⚠️ Có cảnh đang để loại "🪄 Animation / Motion" - ứng dụng chưa tự tạo được loại này. Đổi loại media của
+            cảnh đó ở danh sách cảnh bên trên, hoặc tick "Đã có video / Bỏ qua Veo API" nếu bạn đã tự tạo và tải lên
+            clip, trước khi Dựng bằng Veo API.
+          </p>
+        )}
+
         {!autoHook && !referencesResolved && (
           <p className="wz-hint" style={{ marginTop: 8 }}>
             Cần hoàn tất bước "Ảnh mẫu" trước.{" "}
@@ -685,8 +877,13 @@ export function GenerateStep({ overview, busy, onRefresh, onJobStarted, onGoTo, 
 
         <div className="wz-actions">
           <button type="button" className="wz-btn wz-btn-primary" disabled={!canStart} onClick={handleStart}>
-            {starting ? "Đang gửi..." : "Bắt đầu dựng video"}
+            {starting ? "Đang gửi..." : "Dựng bằng Veo API"}
           </button>
+          <CostNote kind="video" usd={estimate.totalCostUsd}>
+            {estimate.totalCostUsd > 0
+              ? "tổng ước tính cho các cảnh cần tạo (xem bảng chi tiết phía trên)"
+              : "Bước này không phát sinh phí video AI (toàn ảnh tĩnh / clip tải lên)"}
+          </CostNote>
           {overview.clips.some((c) => c.state === "Ready") && (
             <button type="button" className="wz-btn" disabled={disabled} onClick={() => onGoTo("Preview")}>
               Xem các clip đã có
@@ -700,7 +897,7 @@ export function GenerateStep({ overview, busy, onRefresh, onJobStarted, onGoTo, 
         </p>
 
         <AttemptsPanel attempts={overview.attempts} />
-      </section>
+      </details>
     </>
   );
 }
@@ -710,11 +907,16 @@ export function GenerateStep({ overview, busy, onRefresh, onJobStarted, onGoTo, 
 export function PreviewStep({ overview, catalog, busy, onRefresh, onJobStarted, onGoTo, onError }: StepProps) {
   const [rendering, setRendering] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [retryingFailed, setRetryingFailed] = useState(false);
 
   const allReady = useMemo(
     () => overview.clips.length > 0 && overview.clips.every((clip) => clip.state === "Ready"),
     [overview.clips],
   );
+
+  const readyClipCount = useMemo(() => overview.clips.filter((c) => c.state === "Ready").length, [overview.clips]);
+  const workingClipCount = useMemo(() => overview.clips.filter((c) => c.state === "Working").length, [overview.clips]);
+  const failedClips = useMemo(() => overview.clips.filter((c) => c.state === "Failed"), [overview.clips]);
 
   const handleRender = async () => {
     setRendering(true);
@@ -724,7 +926,7 @@ export function PreviewStep({ overview, catalog, busy, onRefresh, onJobStarted, 
       onJobStarted();
       onRefresh();
     } catch (err) {
-      onError(err instanceof Error ? err.message : "Không ghép được video.");
+      onError(describeApiError(err, "Không ghép được video."));
     } finally {
       setRendering(false);
     }
@@ -738,9 +940,30 @@ export function PreviewStep({ overview, catalog, busy, onRefresh, onJobStarted, 
       await wizardApi.uploadMusic(overview.id, file);
       onRefresh();
     } catch (err) {
-      onError(err instanceof Error ? err.message : "Không tải được file nhạc.");
+      onError(describeApiError(err, "Không tải được file nhạc."));
     } finally {
       setUploading(false);
+    }
+  };
+
+  // One click to retry every failed clip instead of opening each ClipCard in
+  // turn - reuses the exact same regenerate call each clip's own "Tạo lại
+  // clip này" makes (same defaults: no forced voice redo, no narration
+  // change), just fired for all of them at once.
+  const handleRetryFailedClips = async () => {
+    if (failedClips.length === 0) return;
+    setRetryingFailed(true);
+    onError(null);
+    try {
+      await Promise.all(
+        failedClips.map((clip) => wizardApi.regenerateClip(overview.id, clip.id, { regenerateVoice: false })),
+      );
+      onJobStarted();
+      onRefresh();
+    } catch (err) {
+      onError(describeApiError(err, "Không thử lại được một số clip lỗi."));
+    } finally {
+      setRetryingFailed(false);
     }
   };
 
@@ -765,6 +988,28 @@ export function PreviewStep({ overview, catalog, busy, onRefresh, onJobStarted, 
           Không ưng clip nào thì tạo lại đúng clip đó - các clip khác giữ nguyên, không mất thêm thời gian và chi phí.
         </p>
 
+        {overview.clips.length > 0 && failedClips.length > 0 && (
+          <div className="wz-error" style={{ marginBottom: 14 }}>
+            <strong>
+              {readyClipCount}/{overview.clips.length} clip xong · {failedClips.length} lỗi
+              {workingClipCount > 0 ? ` · ${workingClipCount} đang dựng` : ""}
+            </strong>
+            <p className="wz-hint" style={{ marginTop: 6 }}>
+              Các clip đã xong được giữ nguyên - chỉ {failedClips.length} clip lỗi sẽ được tạo lại.
+            </p>
+            <div className="wz-actions" style={{ marginTop: 10 }}>
+              <button
+                type="button"
+                className="wz-btn wz-btn-primary wz-btn-sm"
+                disabled={disabled || retryingFailed}
+                onClick={handleRetryFailedClips}
+              >
+                {retryingFailed ? "Đang gửi..." : `Thử lại ${failedClips.length} clip lỗi`}
+              </button>
+            </div>
+          </div>
+        )}
+
         <div className="wz-clips">
           {overview.clips.map((clip) => (
             <ClipCard
@@ -772,6 +1017,7 @@ export function PreviewStep({ overview, catalog, busy, onRefresh, onJobStarted, 
               contentProjectId={overview.id}
               clip={clip}
               disabled={disabled}
+              audioMode={overview.composition.audioMode}
               onRegenerated={() => {
                 onJobStarted();
                 onRefresh();
@@ -780,6 +1026,17 @@ export function PreviewStep({ overview, catalog, busy, onRefresh, onJobStarted, 
           ))}
         </div>
       </section>
+
+      <AudioModeSelector
+        contentProjectId={overview.id}
+        value={overview.composition.audioMode}
+        disabled={disabled}
+        onChanged={onRefresh}
+      />
+
+      {overview.composition.audioMode !== "Muted" && (
+        <VoiceSettings overview={overview} catalog={catalog} disabled={disabled} onChanged={onRefresh} />
+      )}
 
       <CaptionEditor
         contentProjectId={overview.id}
@@ -874,9 +1131,9 @@ export function ExportStep({ overview, busy, onGoTo }: StepProps) {
         <h2>Video đã xong</h2>
 
         <div className="wz-validate">
-          <span className={`wz-badge ${v.ok ? "wz-badge-ready" : "wz-badge-failed"}`}>
+          <StatusBadge tone={v.ok ? "success" : "danger"}>
             {v.ok ? "Đạt kiểm tra cuối" : "Không đạt kiểm tra"}
-          </span>
+          </StatusBadge>
           {v.durationSeconds > 0 && <span className="wz-hint">{v.durationSeconds.toFixed(1)}s</span>}
         </div>
         <ValidationList title="Lỗi kiểm tra" items={v.errors} error />
@@ -889,7 +1146,7 @@ export function ExportStep({ overview, busy, onGoTo }: StepProps) {
         />
 
         <div className="wz-actions">
-          <a className="wz-btn wz-btn-primary" href={fileUrl} download={`${overview.title}.mp4`}>
+          <a className="wz-btn" href={fileUrl} download={`${overview.title}.mp4`}>
             Tải video về
           </a>
           <button type="button" className="wz-btn" disabled={busy} onClick={() => onGoTo("Preview")}>
@@ -903,6 +1160,7 @@ export function ExportStep({ overview, busy, onGoTo }: StepProps) {
         defaultTitle={overview.title}
         defaultCaption={defaultCaption}
         defaultHashtags={defaultHashtags}
+        finalVideoUrl={overview.finalVideoUrl}
       />
     </>
   );

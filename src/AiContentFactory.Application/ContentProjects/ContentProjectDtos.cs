@@ -29,6 +29,21 @@ public record UpdateContentProjectRequest(
 
 public record ChangeContentProjectStatusRequest(ContentProjectStatus Status);
 
+/// <summary>Step 6 Voice option: keep the clip's own audio, generate a new voice-over, or mute.</summary>
+public record SetAudioModeRequest(AudioMode AudioMode);
+
+/// <summary>
+/// Step 6 voice configuration. Changing any of this marks the project's existing
+/// per-scene TTS tracks stale so the next render regenerates them with the new
+/// voice - otherwise a re-render would silently reuse the old audio.
+/// </summary>
+public record SetVoiceSettingsRequest(
+    string? VoicePresetId,
+    VoiceGender VoiceGender = VoiceGender.Unspecified,
+    string? VoiceStyle = null,
+    double? SpeakingRate = null,
+    string? NarrationLanguage = null);
+
 public record ContentProjectResponse(
     Guid Id,
     string Title,
@@ -44,6 +59,7 @@ public record ContentProjectResponse(
     string? CaptionPresetId,
     CaptionSettingsDto Captions,
     ContentIdeaConfigDto IdeaConfig,
+    string AudioMode,
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt)
 {
@@ -62,6 +78,7 @@ public record ContentProjectResponse(
         project.CaptionPresetId,
         CaptionSettingsDto.FromDomain(project.Captions),
         ContentIdeaConfigDto.FromDomain(project.IdeaConfig),
+        project.AudioMode.ToString(),
         project.CreatedAt,
         project.UpdatedAt);
 }

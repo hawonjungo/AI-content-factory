@@ -31,7 +31,8 @@ public class VideoQualityValidatorTests : IDisposable
         IReadOnlyList<CaptionCue>? cues = null,
         int sceneCount = 6,
         int scenesWithVisual = 6,
-        bool renderSucceeded = true) =>
+        bool renderSucceeded = true,
+        bool requireNarration = true) =>
         new(
             path ?? _file,
             TargetWidth: 1080, TargetHeight: 1920, TargetFps: 30,
@@ -40,7 +41,8 @@ public class VideoQualityValidatorTests : IDisposable
             CaptionsEnabled: captionsEnabled,
             Cues: cues ?? Cues((0, 3), (3, 6), (6, 9)),
             SceneCount: sceneCount, ScenesWithVisual: scenesWithVisual,
-            RenderSucceeded: renderSucceeded);
+            RenderSucceeded: renderSucceeded,
+            RequireNarration: requireNarration);
 
     private static VideoQualityValidator Validator(MediaInfo info) => new(new FakeMediaProbe(info));
 
@@ -98,6 +100,18 @@ public class VideoQualityValidatorTests : IDisposable
 
         Assert.False(report.IsValid);
         Assert.Contains(report.Errors, e => e.Contains("no narration audio was produced"));
+    }
+
+    [Fact]
+    public async Task Zero_narration_seconds_is_fine_when_narration_is_not_required()
+    {
+        // "Keep original audio" / "Mute": there is deliberately no TTS track,
+        // but the muxed clip/silent audio still gives a valid audio stream.
+        var report = await Validator(FakeMediaProbe.GoodInfo())
+            .ValidateAsync(Context(narrationSeconds: 0, requireNarration: false));
+
+        Assert.True(report.IsValid, report.Summary);
+        Assert.DoesNotContain(report.Errors, e => e.Contains("no narration audio was produced"));
     }
 
     [Fact]

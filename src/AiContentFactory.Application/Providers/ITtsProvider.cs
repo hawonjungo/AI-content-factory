@@ -14,7 +14,8 @@ public record TtsRequest(
     double? Pitch = null,
     string? Language = null);
 
-public record TtsResult(byte[] AudioBytes, string MimeType, double DurationSeconds, string Model);
+/// <param name="IsFree">True for a self-hosted voice with no per-call cost (recorded as $0 spend).</param>
+public record TtsResult(byte[] AudioBytes, string MimeType, double DurationSeconds, string Model, bool IsFree = false);
 
 /// <summary>
 /// The replaceable seam for text-to-speech. Implementations map whatever of

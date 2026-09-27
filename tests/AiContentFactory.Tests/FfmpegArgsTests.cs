@@ -21,13 +21,61 @@ public class FfmpegArgsTests
         Assert.Contains("-map 0:v:0 -map 1:a:0", args);
         Assert.Contains("-i \"/voice/1.wav\"", args);
         Assert.Contains("-stream_loop -1", args);
-        Assert.Contains("-shortest", args);
+        // -t is the length authority; the voice is levelled and padded to fill
+        // the scene. -shortest is deliberately gone (it truncated short voices).
+        Assert.Contains("-t 8.00", args);
+        Assert.Contains("dynaudnorm", args);
+        Assert.Contains("apad", args);
+        Assert.DoesNotContain("-shortest", args);
     }
 
     [Fact]
     public void A_scene_with_no_narration_still_gets_a_mapped_silent_track()
     {
         var args = FfmpegArgs.SegmentArgs(VideoScene(voice: null), "/out/seg.mp4", 1080, 1920, 30);
+
+        Assert.Contains("anullsrc", args);
+        Assert.Contains("-map 0:v:0 -map 1:a:0", args);
+    }
+
+    [Fact]
+    public void Audio_mode_Clip_keeps_the_clips_own_audio_and_adds_no_extra_input()
+    {
+        var scene = VideoScene() with { AudioSource = SceneAudioSource.Clip };
+        var args = FfmpegArgs.SegmentArgs(scene, "/out/seg.mp4", 1080, 1920, 30);
+
+        Assert.Contains("-map 0:v:0 -map 0:a:0", args);
+        Assert.DoesNotContain("anullsrc", args);
+        Assert.DoesNotContain("/voice/1.wav", args);
+    }
+
+    [Fact]
+    public void Audio_mode_Clip_levels_and_pads_the_kept_audio_so_transitions_do_not_jump()
+    {
+        var scene = VideoScene() with { AudioSource = SceneAudioSource.Clip };
+        var args = FfmpegArgs.SegmentArgs(scene, "/out/seg.mp4", 1080, 1920, 30);
+
+        Assert.Contains("dynaudnorm", args); // level-match with the TTS scenes
+        Assert.Contains("apad", args);       // fill the segment - no silent gap at the cut
+    }
+
+    [Fact]
+    public void Audio_mode_Silent_forces_a_generated_silent_track_and_ignores_any_voice()
+    {
+        var scene = VideoScene() with { AudioSource = SceneAudioSource.Silent };
+        var args = FfmpegArgs.SegmentArgs(scene, "/out/seg.mp4", 1080, 1920, 30);
+
+        Assert.Contains("anullsrc", args);
+        Assert.Contains("-map 0:v:0 -map 1:a:0", args);
+        Assert.DoesNotContain("/voice/1.wav", args);
+        Assert.DoesNotContain("dynaudnorm", args); // never normalise pure silence
+    }
+
+    [Fact]
+    public void Audio_mode_Clip_on_a_still_image_degrades_to_a_silent_track()
+    {
+        var scene = StillScene(SceneMotion.KenBurnsIn) with { AudioSource = SceneAudioSource.Clip };
+        var args = FfmpegArgs.SegmentArgs(scene, "/out/seg.mp4", 1080, 1920, 30);
 
         Assert.Contains("anullsrc", args);
         Assert.Contains("-map 0:v:0 -map 1:a:0", args);

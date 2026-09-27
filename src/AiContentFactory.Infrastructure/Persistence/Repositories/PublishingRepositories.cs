@@ -32,6 +32,12 @@ public class PublishJobRepository : IPublishJobRepository
     public async Task AddAsync(PublishJob job, CancellationToken cancellationToken = default) =>
         await _db.Set<PublishJob>().AddAsync(job, cancellationToken);
 
+    public Task RemoveRangeAsync(IEnumerable<PublishJob> jobs, CancellationToken cancellationToken = default)
+    {
+        _db.Set<PublishJob>().RemoveRange(jobs);
+        return Task.CompletedTask;
+    }
+
     public Task SaveChangesAsync(CancellationToken cancellationToken = default) =>
         _db.SaveChangesAsync(cancellationToken);
 }

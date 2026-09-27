@@ -17,6 +17,19 @@ public enum TransitionKind
     Fade = 1
 }
 
+/// <summary>Where a scene segment's audio comes from - the Step 6 Voice option, resolved per scene.</summary>
+public enum SceneAudioSource
+{
+    /// <summary>The generated TTS voice track (<see cref="TimelineScene.VoiceAbsolutePath"/>), or silence if absent. Original behaviour.</summary>
+    Voice = 0,
+
+    /// <summary>The clip's own embedded audio.</summary>
+    Clip = 1,
+
+    /// <summary>Forced silence - the clip audio is dropped and no voice is used.</summary>
+    Silent = 2
+}
+
 /// <param name="StartSeconds">Where the scene begins on the finished timeline.</param>
 /// <param name="DurationSeconds">Driven by the scene's narration length (the timeline authority), not the storyboard estimate.</param>
 public record TimelineScene(
@@ -28,10 +41,13 @@ public record TimelineScene(
     double DurationSeconds,
     string? VoiceAbsolutePath,
     TransitionKind TransitionIn,
-    IReadOnlyList<CaptionCue> Cues)
+    IReadOnlyList<CaptionCue> Cues,
+    SceneAudioSource AudioSource = SceneAudioSource.Voice)
 {
     public double EndSeconds => StartSeconds + DurationSeconds;
-    public bool HasNarration => !string.IsNullOrWhiteSpace(VoiceAbsolutePath);
+
+    /// <summary>True only when a TTS voice track is the audio bed for this scene.</summary>
+    public bool HasNarration => AudioSource == SceneAudioSource.Voice && !string.IsNullOrWhiteSpace(VoiceAbsolutePath);
 }
 
 public record Timeline(

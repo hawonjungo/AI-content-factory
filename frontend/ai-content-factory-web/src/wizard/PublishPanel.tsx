@@ -1,11 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
+  describeApiError,
   publishApi,
   type PublishJob,
   type PublishJobStatusName,
   type PublishPlatform,
+  type PublishPlatformOptions,
   type SocialConnection,
 } from "../api/client";
+import { EmptyState, ErrorMessage, Loading, StatusBadge, type StatusTone } from "./components";
 
 const PLATFORMS: { value: PublishPlatform; label: string }[] = [
   { value: "TikTok", label: "TikTok" },
@@ -23,13 +26,13 @@ const STATUS_LABEL: Record<PublishJobStatusName, string> = {
   Cancelled: "Đã huỷ",
 };
 
-const STATUS_CLASS: Record<PublishJobStatusName, string> = {
-  Pending: "wz-badge-working",
-  Scheduled: "wz-badge-working",
-  Publishing: "wz-badge-working",
-  Published: "wz-badge-ready",
-  Failed: "wz-badge-failed",
-  Cancelled: "",
+const STATUS_TONE: Record<PublishJobStatusName, StatusTone> = {
+  Pending: "working",
+  Scheduled: "working",
+  Publishing: "working",
+  Published: "success",
+  Failed: "danger",
+  Cancelled: "neutral",
 };
 
 function fmt(dt: string | null): string {
@@ -57,15 +60,24 @@ export function PublishPanel({
   defaultTitle,
   defaultCaption,
   defaultHashtags,
+  finalVideoUrl,
 }: {
   contentProjectId: string;
   defaultTitle: string;
   defaultCaption: string;
   defaultHashtags: string;
+  /** The wizard's current rendered video file URL - lets this panel tell whether a platform already published THIS exact video. */
+  finalVideoUrl: string | null;
 }) {
   const [connections, setConnections] = useState<SocialConnection[]>([]);
   const [jobs, setJobs] = useState<PublishJob[]>([]);
+  // Only gates the very first fetch - later reloads (polling, after an
+  // action) update connections/jobs in place without re-showing a spinner.
+  const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<Set<PublishPlatform>>(new Set());
+  // Per-platform, independent: picking TikTok's privacy never touches YouTube's (or any other platform's) setting.
+  const [platformOptions, setPlatformOptions] = useState<Partial<Record<PublishPlatform, PublishPlatformOptions>>>({});
+  const [privacyByPlatform, setPrivacyByPlatform] = useState<Partial<Record<PublishPlatform, string>>>({});
   const [title, setTitle] = useState(defaultTitle);
   const [caption, setCaption] = useState(defaultCaption);
   const [hashtags, setHashtags] = useState(defaultHashtags);
@@ -89,7 +101,7 @@ export function PublishPanel({
   );
 
   useEffect(() => {
-    void load();
+    load().finally(() => setLoading(false));
     // Pick up an OAuth redirect result (?social_connected / ?social_select_page / ?social_error).
     const params = new URLSearchParams(window.location.search);
     if (params.get("social_connected")) {
@@ -111,6 +123,78 @@ export function PublishPanel({
 
   const connectionFor = (p: PublishPlatform) => connections.find((c) => c.platform === p);
 
+  // A platform is "already published" only for the video currently loaded and
+  // only for its currently connected account - matches the backend's own
+  // duplicate-publish check (same video asset), so re-rendering a new video
+  // (a different sourceVideoUrl) naturally re-enables it.
+  const publishedForCurrentVideo = new Set<PublishPlatform>(
+    finalVideoUrl
+      ? jobs.filter((j) => j.status === "Published" && j.sourceVideoUrl === finalVideoUrl).map((j) => j.platform)
+      : [],
+  );
+  const publishedKey = [...publishedForCurrentVideo].sort().join(",");
+
+  // A platform that just became "already published" shouldn't sit checked-but-disabled.
+  useEffect(() => {
+    if (!publishedKey) return;
+    setSelected((cur) => {
+      const next = new Set(cur);
+      let changed = false;
+      for (const p of publishedKey.split(",") as PublishPlatform[]) {
+        if (next.delete(p)) changed = true;
+      }
+      return changed ? next : cur;
+    });
+  }, [publishedKey]);
+
+  const connectedPlatformsKey = connections
+    .filter((c) => c.status === "Connected")
+    .map((c) => c.platform)
+    .sort()
+    .join(",");
+
+  // Load each connected platform's own privacy/visibility options independently -
+  // TikTok's come from a live creator_info/query, so they must be re-fetched
+  // whenever a platform (re)connects rather than assumed/cached across platforms.
+  useEffect(() => {
+    if (!connectedPlatformsKey) return;
+    const platforms = connectedPlatformsKey.split(",") as PublishPlatform[];
+    let cancelled = false;
+    void Promise.all(
+      platforms.map(async (p) => {
+        try {
+          const opts = await publishApi.publishOptions(p);
+          return [p, opts] as const;
+        } catch {
+          return [p, null] as const;
+        }
+      }),
+    ).then((results) => {
+      if (cancelled) return;
+      setPlatformOptions((cur) => {
+        const next = { ...cur };
+        for (const [p, opts] of results) {
+          if (opts) next[p] = opts;
+          else delete next[p];
+        }
+        return next;
+      });
+      setPrivacyByPlatform((cur) => {
+        const next = { ...cur };
+        for (const [p, opts] of results) {
+          // Only seed a default the first time - never overwrite a choice the user already made for this platform.
+          if (opts?.defaultPrivacy && next[p] === undefined) {
+            next[p] = opts.defaultPrivacy;
+          }
+        }
+        return next;
+      });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [connectedPlatformsKey]);
+
   const toggle = (p: PublishPlatform) =>
     setSelected((cur) => {
       const next = new Set(cur);
@@ -119,13 +203,17 @@ export function PublishPanel({
       return next;
     });
 
+  // Setting one platform's privacy only ever touches that platform's own key.
+  const setPrivacy = (p: PublishPlatform, value: string) =>
+    setPrivacyByPlatform((cur) => ({ ...cur, [p]: value }));
+
   const connect = async (p: PublishPlatform) => {
     setError(null);
     try {
       const { authorizationUrl } = await publishApi.authorizeUrl(p);
       window.open(authorizationUrl, "_blank", "noopener,noreferrer");
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Không mở được trang kết nối.");
+      setError(describeApiError(e, "Không mở được trang kết nối."));
     }
   };
 
@@ -135,7 +223,7 @@ export function PublishPanel({
       await publishApi.disconnect(p);
       await load();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Không ngắt kết nối được.");
+      setError(describeApiError(e, "Không ngắt kết nối được."));
     }
   };
 
@@ -147,7 +235,7 @@ export function PublishPanel({
       setNotice(null);
       await load();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Không chọn được Page.");
+      setError(describeApiError(e, "Không chọn được Page."));
     }
   };
 
@@ -168,6 +256,12 @@ export function PublishPanel({
     setError(null);
     setNotice(null);
     try {
+      const platformPrivacy: Partial<Record<PublishPlatform, string>> = {};
+      for (const p of selectedList) {
+        const value = privacyByPlatform[p];
+        if (value) platformPrivacy[p] = value;
+      }
+
       const result = await publishApi.publish(contentProjectId, {
         platforms: selectedList,
         title: title.trim(),
@@ -175,6 +269,7 @@ export function PublishPanel({
         hashtags: hashtags.trim() || undefined,
         mode,
         scheduledAt: mode === "schedule" ? localToUtcIso(scheduleAt) : undefined,
+        platformPrivacy: Object.keys(platformPrivacy).length > 0 ? platformPrivacy : undefined,
       });
       const parts: string[] = [];
       if (result.created.length > 0) {
@@ -186,7 +281,7 @@ export function PublishPanel({
       setNotice(parts.join(" ") || "Không có gì để đăng.");
       await load();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Không đăng được.");
+      setError(describeApiError(e, "Không đăng được."));
     } finally {
       submittingRef.current = false;
       setSubmitting(false);
@@ -199,24 +294,67 @@ export function PublishPanel({
       await publishApi.retry(contentProjectId, jobId);
       await load();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Không thử lại được.");
+      setError(describeApiError(e, "Không thử lại được."));
     }
   };
 
+  const clearHistory = async () => {
+    if (!window.confirm("Xóa các lịch sử đăng bị lỗi/đã huỷ? Các video đã đăng thành công sẽ được giữ nguyên.")) {
+      return;
+    }
+    setError(null);
+    try {
+      // The server returns the authoritative remaining list - set it directly
+      // instead of reloading, so a concurrent poll can't re-add a just-cleared row.
+      const remaining = await publishApi.clearHistory(contentProjectId);
+      setJobs(remaining);
+    } catch (e) {
+      setError(describeApiError(e, "Không xóa được lịch sử."));
+    }
+  };
+
+  const connectedCount = connections.filter((c) => c.status === "Connected").length;
+
   return (
     <>
+      {/* Hoisted above every card, not just the content-form one, so feedback
+          from a Platforms-card action (connect/disconnect/select page) - or an
+          OAuth-redirect notice - shows up right away instead of only after
+          scrolling down to a card unrelated to what was just clicked. */}
+      <ErrorMessage message={error} />
+      {notice && <p className="wz-hint">{notice}</p>}
+
+      {!loading && (
+        <p className="wz-hint" style={{ marginBottom: 14 }}>
+          {connectedCount}/{PLATFORMS.length} nền tảng đã kết nối
+          {jobs.length > 0 && ` · ${jobs.length} lần đăng cho video này`}
+        </p>
+      )}
+
       <section className="wz-card">
         <h2>Nền tảng</h2>
         <p className="wz-sub">
           Kết nối tài khoản rồi chọn nơi muốn đăng. Client secret và token nằm hoàn toàn ở máy chủ.
         </p>
 
+        {loading ? (
+          <Loading />
+        ) : (
         <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
           {PLATFORMS.map(({ value, label }) => {
             const conn = connectionFor(value);
             const connected = conn?.status === "Connected";
             const configured = conn?.configured ?? false;
             const needsPage = conn?.status === "PendingSelection";
+            // Published already for THIS video, on THIS connected account - not a
+            // global platform lock. A different account (after reconnecting) or a
+            // freshly rendered video (different sourceVideoUrl) is unaffected.
+            const alreadyPublished = connected && publishedForCurrentVideo.has(value);
+            const publishedJob = alreadyPublished
+              ? jobs.find((j) => j.platform === value && j.status === "Published" && j.sourceVideoUrl === finalVideoUrl)
+              : undefined;
+            const connectionTone: StatusTone =
+              alreadyPublished || connected ? "success" : conn?.status === "Expired" ? "danger" : needsPage ? "working" : "neutral";
             return (
               <li
                 key={value}
@@ -227,27 +365,33 @@ export function PublishPanel({
                   <input
                     type="checkbox"
                     checked={selected.has(value)}
-                    disabled={!connected}
+                    disabled={!connected || alreadyPublished}
                     onChange={() => toggle(value)}
                   />
                   <strong>{label}</strong>
                 </label>
 
-                <span
-                  className={`wz-badge ${connected ? "wz-badge-ready" : conn?.status === "Expired" ? "wz-badge-failed" : needsPage ? "wz-badge-working" : ""}`}
-                >
-                  {connected
-                    ? `Đã kết nối${conn?.accountName ? ` · ${conn.accountName}` : ""}${conn?.accountId ? ` · ID ${conn.accountId}` : ""}`
-                    : conn?.status === "Expired"
-                      ? "Hết hạn"
-                      : needsPage
-                        ? "Chọn Page"
-                        : "Chưa kết nối"}
-                </span>
+                <StatusBadge tone={connectionTone}>
+                  {alreadyPublished
+                    ? "✓ Đã đăng video này"
+                    : connected
+                      ? `Đã kết nối${conn?.accountName ? ` · ${conn.accountName}` : ""}${conn?.accountId ? ` · ID ${conn.accountId}` : ""}`
+                      : conn?.status === "Expired"
+                        ? "Hết hạn"
+                        : needsPage
+                          ? "Chọn Page"
+                          : "Chưa kết nối"}
+                </StatusBadge>
+
+                {alreadyPublished && publishedJob?.publishedUrl && (
+                  <a href={publishedJob.publishedUrl} target="_blank" rel="noreferrer">
+                    Mở bài đăng ↗
+                  </a>
+                )}
 
                 <span style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
                   {connected ? (
-                    <button type="button" className="wz-btn wz-btn-sm" onClick={() => disconnect(value)}>
+                    <button type="button" className="wz-btn wz-btn-sm wz-btn-danger" onClick={() => disconnect(value)}>
                       Ngắt kết nối
                     </button>
                   ) : needsPage ? (
@@ -269,8 +413,11 @@ export function PublishPanel({
 
                 {needsPage && conn?.pages && conn.pages.length > 0 && (
                   <div style={{ flexBasis: "100%", display: "flex", gap: 6, alignItems: "center", marginTop: 4 }}>
-                    <span className="wz-hint">Facebook Page:</span>
+                    <label className="wz-hint" htmlFor={`fb-page-${value}`}>
+                      Facebook Page:
+                    </label>
                     <select
+                      id={`fb-page-${value}`}
                       value=""
                       onChange={(e) => selectPage(value, e.target.value)}
                     >
@@ -285,10 +432,40 @@ export function PublishPanel({
                     </select>
                   </div>
                 )}
+
+                {/* Each platform's own privacy/visibility setting - only shown when that
+                    platform actually supports one (TikTok's list comes live from
+                    creator_info/query; YouTube's is fixed; Instagram/Facebook show nothing). */}
+                {connected && (platformOptions[value]?.privacyOptions.length ?? 0) > 0 && (
+                  <div style={{ flexBasis: "100%", display: "flex", flexDirection: "column", gap: 4, marginTop: 4 }}>
+                    <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                      <label className="wz-hint" htmlFor={`privacy-${value}`}>
+                        {label} - chế độ hiển thị:
+                      </label>
+                      <select
+                        id={`privacy-${value}`}
+                        value={privacyByPlatform[value] ?? platformOptions[value]?.defaultPrivacy ?? ""}
+                        onChange={(e) => setPrivacy(value, e.target.value)}
+                      >
+                        {platformOptions[value]!.privacyOptions.map((o) => (
+                          <option key={o.value} value={o.value}>
+                            {o.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    {platformOptions[value]?.notice && (
+                      <p className="wz-hint" style={{ margin: 0 }}>
+                        {platformOptions[value]!.notice}
+                      </p>
+                    )}
+                  </div>
+                )}
               </li>
             );
           })}
         </ul>
+        )}
       </section>
 
       <section className="wz-card">
@@ -328,9 +505,6 @@ export function PublishPanel({
           </label>
         )}
 
-        {error && <p className="wz-error">{error}</p>}
-        {notice && <p className="wz-hint">{notice}</p>}
-
         <div className="wz-actions">
           <button type="button" className="wz-btn wz-btn-primary" disabled={!canSubmit} onClick={submit}>
             {submitting ? "Đang gửi..." : "🚀 Đăng / Lên lịch video"}
@@ -341,9 +515,29 @@ export function PublishPanel({
         )}
       </section>
 
-      {jobs.length > 0 && (
+      {loading ? (
         <section className="wz-card">
           <h2>Trạng thái đăng</h2>
+          <Loading />
+        </section>
+      ) : jobs.length === 0 ? (
+        <section className="wz-card">
+          <h2>Trạng thái đăng</h2>
+          <EmptyState
+            title="Chưa có lần đăng nào"
+            description={'Chọn một nền tảng đã kết nối ở trên rồi bấm "Đăng / Lên lịch video" - trạng thái từng lần đăng sẽ hiện ở đây.'}
+          />
+        </section>
+      ) : (
+        <section className="wz-card">
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+            <h2 style={{ margin: 0 }}>Trạng thái đăng</h2>
+            {jobs.some((j) => j.status === "Failed" || j.status === "Cancelled") && (
+              <button type="button" className="wz-btn wz-btn-sm" onClick={clearHistory}>
+                Xóa lịch sử
+              </button>
+            )}
+          </div>
           <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
             {jobs.map((j) => (
               <li
@@ -354,7 +548,12 @@ export function PublishPanel({
                 <strong style={{ fontSize: 13 }}>
                   {PLATFORMS.find((p) => p.value === j.platform)?.label ?? j.platform}
                 </strong>
-                <span className={`wz-badge ${STATUS_CLASS[j.status]}`}>{STATUS_LABEL[j.status]}</span>
+                <StatusBadge tone={STATUS_TONE[j.status]}>{STATUS_LABEL[j.status]}</StatusBadge>
+                {j.privacy && (
+                  <span className="wz-hint">
+                    {platformOptions[j.platform]?.privacyOptions.find((o) => o.value === j.privacy)?.label ?? j.privacy}
+                  </span>
+                )}
                 {j.scheduledAtUtc && j.status === "Scheduled" && (
                   <span className="wz-hint">lịch: {fmt(j.scheduledAtUtc)}</span>
                 )}

@@ -13,7 +13,7 @@ public sealed class SpySceneAssetGenerator : ISceneAssetGenerator
     public List<Guid> VoiceCalls { get; } = new();
 
     public Task<SceneGenerationContext> BuildContextAsync(ContentProject project, CancellationToken cancellationToken = default) =>
-        Task.FromResult(new SceneGenerationContext(project.Id, project.AspectRatio, null!, null!, null, null));
+        Task.FromResult(new SceneGenerationContext(project.Id, project.AspectRatio, null!, null!, null, null, Array.Empty<ApprovedSceneReference>()));
 
     public Task GenerateClipAsync(SceneGenerationContext context, SceneResponse scene, bool refreshPrompt, CancellationToken cancellationToken = default)
     {

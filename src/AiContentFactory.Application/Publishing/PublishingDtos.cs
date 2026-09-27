@@ -6,13 +6,21 @@ public enum PublishMode { Now = 0, Schedule = 1 }
 
 /// <param name="Platforms">Which platforms to publish to. Empty = nothing happens.</param>
 /// <param name="ScheduledAtUtc">Required when <paramref name="Mode"/> is Schedule; must be in the future.</param>
+/// <param name="PlatformPrivacy">
+/// Per-platform privacy/visibility choice (e.g. TikTok "SELF_ONLY", YouTube
+/// "unlisted"), keyed by platform. Each platform's own publisher interprets its
+/// own value - there is no shared privacy enum, and picking a value for one
+/// platform never affects another. Missing entries fall back to that
+/// platform's own default.
+/// </param>
 public record PublishRequest(
     IReadOnlyList<PublishTarget> Platforms,
     string Title,
     string? Caption,
     string? Hashtags,
     PublishMode Mode,
-    DateTimeOffset? ScheduledAtUtc);
+    DateTimeOffset? ScheduledAtUtc,
+    IReadOnlyDictionary<PublishTarget, string>? PlatformPrivacy = null);
 
 /// <param name="Configured">The platform's client key/secret are present in config.</param>
 /// <param name="AccountId">The connected target id (Facebook Page ID / Instagram user id / channel).</param>
@@ -35,6 +43,13 @@ public record SocialConnectionDto(
 
 public record SocialPageDto(string Id, string Name);
 
+/// <param name="SourceVideoUrl">
+/// The same relative file URL the wizard's own "final video" points at
+/// (/content-projects/{id}/assets/{videoAssetId}/file) - lets the UI tell
+/// whether a Published job was for the video currently loaded, without
+/// exposing the raw asset id anywhere. Two jobs sharing this value were
+/// published from the exact same rendered file.
+/// </param>
 public record PublishJobDto(
     Guid Id,
     string Platform,
@@ -47,7 +62,9 @@ public record PublishJobDto(
     string? ErrorMessage,
     int AttemptCount,
     bool CanRetry,
-    bool IsPermanentFailure)
+    bool IsPermanentFailure,
+    string? Privacy,
+    string SourceVideoUrl)
 {
     public static PublishJobDto FromDomain(PublishJob j) => new(
         j.Id,
@@ -61,7 +78,9 @@ public record PublishJobDto(
         j.ErrorMessage,
         j.AttemptCount,
         j.CanRetry,
-        j.IsPermanentFailure);
+        j.IsPermanentFailure,
+        j.Privacy,
+        $"/content-projects/{j.ContentProjectId}/assets/{j.VideoAssetId}/file");
 }
 
 /// <param name="Created">Jobs queued or scheduled by this request.</param>

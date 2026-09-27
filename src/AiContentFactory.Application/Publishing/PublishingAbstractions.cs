@@ -29,6 +29,8 @@ public interface IPublishJobRepository
     Task<IReadOnlyList<PublishJob>> GetByProjectAsync(Guid contentProjectId, CancellationToken cancellationToken = default);
     Task<PublishJob?> GetActiveAsync(Guid contentProjectId, PublishTarget platform, CancellationToken cancellationToken = default);
     Task AddAsync(PublishJob job, CancellationToken cancellationToken = default);
+    /// <summary>Permanently deletes these jobs (used by "Clear History" - callers must never pass a Published job).</summary>
+    Task RemoveRangeAsync(IEnumerable<PublishJob> jobs, CancellationToken cancellationToken = default);
     Task SaveChangesAsync(CancellationToken cancellationToken = default);
 }
 

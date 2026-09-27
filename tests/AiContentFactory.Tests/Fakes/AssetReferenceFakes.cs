@@ -1,10 +1,41 @@
 using System.Text;
+using AiContentFactory.Application.Agents;
 using AiContentFactory.Application.AssetReferences;
 using AiContentFactory.Application.Costs;
 using AiContentFactory.Application.Storage;
 using AiContentFactory.Domain.AssetReferences;
 
 namespace AiContentFactory.Tests.Fakes;
+
+/// <summary>Records what it was asked for and returns a controllable (or sensible default) prompt - so tests can assert the service passes real script/style/idea-config context through, without making a real LLM call.</summary>
+public sealed class FakeAssetReferencePromptAgent : IAssetReferencePromptAgent
+{
+    public AssetReferencePromptAgentInput? LastInput { get; private set; }
+    public int Calls { get; private set; }
+    public Func<AssetReferencePromptAgentInput, AssetReferencePromptOutput>? Respond { get; set; }
+
+    public Task<AssetReferencePromptOutput> GenerateAsync(AssetReferencePromptAgentInput input, CancellationToken cancellationToken = default)
+    {
+        LastInput = input;
+        Calls++;
+        return Task.FromResult(Respond?.Invoke(input) ?? DefaultOutput(input));
+    }
+
+    private static AssetReferencePromptOutput DefaultOutput(AssetReferencePromptAgentInput input) =>
+        new(
+            new AssetReferenceVisualAnalysis(
+                MainSubjects: new[] { "test subject" },
+                Action: "test action",
+                Environment: "test environment",
+                Emotion: "test emotion",
+                Tone: "test tone",
+                VisualStyle: input.StyleGuidance,
+                Lighting: "test lighting",
+                ColorPalette: "test palette",
+                Composition: "test composition"),
+            Prompt: $"Generated {input.AssetType} prompt for \"{input.Title}\".",
+            NegativePrompt: "text, watermark");
+}
 
 public sealed class FakeAssetReferenceRepository : IAssetReferenceRepository
 {

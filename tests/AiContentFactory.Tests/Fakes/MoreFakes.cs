@@ -52,6 +52,26 @@ public sealed class FakeStoryboardService : IStoryboardService
     }
     public Task<StoryboardResponse> SetScenePromptTextAsync(Guid c, Guid s, string? p, string? n, CancellationToken ct = default) => throw new NotSupportedException();
     public Task<StoryboardResponse> SuggestScenePromptAsync(Guid c, Guid s, CancellationToken ct = default) => throw new NotSupportedException();
+    public Task<BulkPromptSuggestionResult> SuggestAllScenePromptsAsync(Guid c, CancellationToken ct = default) => throw new NotSupportedException();
+    public Task<BulkPromptSuggestionResult> SuggestAllScenePromptsAsync(Guid c, bool includePrompted, CancellationToken ct = default) => throw new NotSupportedException();
+    public Task<StoryboardResponse> SetSceneShotSizeAsync(Guid c, Guid sceneId, ShotSize shotSize, CancellationToken ct = default) => throw new NotSupportedException();
+    public Task<StoryboardResponse> SetSceneCharacterOnScreenAsync(Guid c, Guid sceneId, bool? characterOnScreen, CancellationToken ct = default) => throw new NotSupportedException();
+
+    public Task<StoryboardResponse> ApproveKeyframeAsync(Guid c, Guid sceneId, CancellationToken ct = default)
+    {
+        var scene = _repo.Current?.Scenes.FirstOrDefault(s => s.Id == sceneId)
+            ?? throw new InvalidOperationException("scene not found");
+        scene.ApproveKeyframe();
+        return Task.FromResult(StoryboardResponse.FromDomain(_repo.Current!));
+    }
+
+    public Task<StoryboardResponse> SetMotionPromptAsync(Guid c, Guid sceneId, string? motionPrompt, CancellationToken ct = default)
+    {
+        var scene = _repo.Current?.Scenes.FirstOrDefault(s => s.Id == sceneId)
+            ?? throw new InvalidOperationException("scene not found");
+        scene.SetMotionPrompt(motionPrompt);
+        return Task.FromResult(StoryboardResponse.FromDomain(_repo.Current!));
+    }
 }
 
 /// <summary>In-memory <see cref="IAssetService"/>. Reads/creates/supersedes; uploads throw.</summary>

@@ -3,6 +3,11 @@ namespace AiContentFactory.Application.Rendering;
 /// <param name="ExpectedMinSeconds">Lower bound for the finished video (typically the timeline total minus a tolerance).</param>
 /// <param name="ExpectedMaxSeconds">Upper bound for the finished video.</param>
 /// <param name="ScenesWithVisual">Scenes that actually had a ready visual asset; less than <see cref="SceneCount"/> means a gap.</param>
+/// <param name="RequireNarration">
+/// When true (the "generate new voice" audio mode), a video with no TTS
+/// narration fails validation. False for "keep original audio" / "mute", where
+/// there is deliberately no separate narration track.
+/// </param>
 public record VideoValidationContext(
     string OutputAbsolutePath,
     int TargetWidth,
@@ -15,7 +20,8 @@ public record VideoValidationContext(
     IReadOnlyList<CaptionCue> Cues,
     int SceneCount,
     int ScenesWithVisual,
-    bool RenderSucceeded);
+    bool RenderSucceeded,
+    bool RequireNarration = true);
 
 public record VideoValidationReport(bool IsValid, IReadOnlyList<string> Errors, IReadOnlyList<string> Warnings)
 {
@@ -62,7 +68,7 @@ public class VideoQualityValidator : IVideoQualityValidator
             errors.Add($"{context.SceneCount - context.ScenesWithVisual} of {context.SceneCount} scene(s) have no visual asset");
         }
 
-        if (context.NarrationSeconds <= 0)
+        if (context.RequireNarration && context.NarrationSeconds <= 0)
         {
             errors.Add("no narration audio was produced for this video");
         }
@@ -89,7 +95,9 @@ public class VideoQualityValidator : IVideoQualityValidator
 
         if (!media.HasAudio)
         {
-            errors.Add("output has no audio stream - narrator audio is missing from the final video");
+            errors.Add(context.RequireNarration
+                ? "output has no audio stream - narrator audio is missing from the final video"
+                : "output has no audio stream");
         }
         else if (media.AudioDurationSeconds <= 0)
         {

@@ -28,6 +28,45 @@ public class CaptionSegmentationServiceTests
     }
 
     [Fact]
+    public void Captions_are_generated_from_scene_duration_when_there_is_no_narration_timing()
+    {
+        // "Keep original audio" clips reach here with AudioTiming.Empty. Captions
+        // must NOT disappear - they spread across the scene's own 8s length.
+        var text = "Five AI tools that quietly save you ten hours every single week.";
+        var input = new SceneCaptionInput(text, AudioTiming.Empty, SceneOffsetSeconds: 4.0, SceneDurationSeconds: 8.0);
+
+        var cues = _service.Segment(new[] { input }, Captions(), _options);
+
+        Assert.NotEmpty(cues);
+        Assert.All(cues, c => Assert.InRange(c.StartSeconds, 4.0 - 0.01, 12.0 + 0.01));
+        Assert.All(cues, c => Assert.True(c.EndSeconds <= 12.01, $"cue ends at {c.EndSeconds}, past the 12s scene end"));
+        Assert.True(cues.Max(c => c.EndSeconds) >= 10.0, "captions should span most of the 8s scene");
+    }
+
+    [Fact]
+    public void A_scene_with_no_timing_and_no_duration_is_skipped_not_crashed()
+    {
+        var input = new SceneCaptionInput("some text", AudioTiming.Empty, 0, SceneDurationSeconds: 0);
+        var cues = _service.Segment(new[] { input }, Captions(), _options);
+        Assert.Empty(cues);
+    }
+
+    [Fact]
+    public void The_subtitle_timeline_never_runs_past_the_visual_timeline()
+    {
+        // A short scene packed with words: cues must be clamped to the 4s end,
+        // never overshoot it (that trips the final-video validator).
+        var text = "One two three four five six seven eight nine ten eleven twelve thirteen fourteen.";
+        var input = new SceneCaptionInput(text, AudioTiming.Empty, SceneOffsetSeconds: 0, SceneDurationSeconds: 4.0);
+
+        var cues = _service.Segment(new[] { input }, Captions(), _options);
+
+        Assert.NotEmpty(cues);
+        Assert.All(cues, c => Assert.True(c.EndSeconds <= 4.0 + 1e-6, $"cue ends at {c.EndSeconds}, past the 4s scene"));
+        Assert.All(cues, c => Assert.All(c.Words, w => Assert.True(w.EndSeconds <= 4.0 + 1e-6)));
+    }
+
+    [Fact]
     public void Does_not_split_blindly_on_periods()
     {
         // Naive text.Split('.') would make one-word cues "Wait" and "Stop".

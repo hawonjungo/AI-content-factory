@@ -3,15 +3,21 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import "../ui/wizard.css";
 import {
   contentProjectsApi,
+  describeApiError,
   presetsApi,
   wizardApi,
+  type ContentIdeaSuggestion,
   type PresetCatalog,
   type ProjectOverview,
   type WizardStepName,
 } from "../api/client";
 import { ExportStep, GenerateStep, IdeaStep, PreviewStep, ScriptStep, TemplateStep, type StepProps } from "./steps";
+import { ContentIdeaSuggestions } from "./ContentIdeaSuggestions";
 import { ReferencesStep } from "./ReferencesStep";
-import { Field, PresetPicker, ProgressPanel, StepNav } from "./components";
+import { CostNote, ErrorMessage, Field, Loading, PresetPicker, ProgressPanel, StepNav } from "./components";
+
+/** New projects have no language picker; the API defaults to this on create. */
+const NEW_PROJECT_LANGUAGE = "en";
 
 const POLL_INTERVAL_MS = 3000;
 
@@ -42,13 +48,13 @@ function WizardPage() {
     presetsApi
       .getCatalog()
       .then(setCatalog)
-      .catch((err) => setCatalogError(err instanceof Error ? err.message : "Không tải được danh sách mẫu."));
+      .catch((err) => setCatalogError(describeApiError(err, "Không tải được danh sách mẫu.")));
   }, []);
 
   if (catalogError) {
     return (
       <main className="wz">
-        <p className="wz-error">{catalogError}</p>
+        <ErrorMessage message={catalogError} />
       </main>
     );
   }
@@ -56,7 +62,7 @@ function WizardPage() {
   if (!catalog) {
     return (
       <main className="wz">
-        <p>Đang tải...</p>
+        <Loading />
       </main>
     );
   }
@@ -87,6 +93,19 @@ function NewProjectWizard({ catalog }: { catalog: PresetCatalog }) {
 
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Drops an AI-suggested idea into the normal fields; from here it is just a
+  // user-entered idea and the create flow is unchanged.
+  const useSuggestedIdea = (suggestion: ContentIdeaSuggestion) => {
+    setError(null);
+    setTitle(suggestion.title);
+    setNiche(suggestion.niche);
+    setTopic(
+      suggestion.hook.trim()
+        ? `${suggestion.concept.trim()}\n\nMở đầu gợi ý: ${suggestion.hook.trim()}`
+        : suggestion.concept.trim(),
+    );
+  };
 
   // Picking a template pre-fills the other three and the duration, so the
   // fastest path through the wizard is template -> title -> go.
@@ -119,7 +138,7 @@ function NewProjectWizard({ catalog }: { catalog: PresetCatalog }) {
       await contentProjectsApi.generate(project.id);
       navigate(`/projects/${project.id}`, { replace: true });
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Không tạo được video.");
+      setError(describeApiError(err, "Không tạo được video."));
       setSubmitting(false);
     }
   };
@@ -135,7 +154,7 @@ function NewProjectWizard({ catalog }: { catalog: PresetCatalog }) {
         onSelect={setStep}
       />
 
-      {error && <p className="wz-error">{error}</p>}
+      <ErrorMessage message={error} />
 
       {step === "Template" ? (
         <section className="wz-card">
@@ -174,6 +193,14 @@ function NewProjectWizard({ catalog }: { catalog: PresetCatalog }) {
           <h2>Ý tưởng video</h2>
           <p className="wz-sub">Càng cụ thể thì kịch bản càng sắc.</p>
 
+          <ContentIdeaSuggestions
+            language={NEW_PROJECT_LANGUAGE}
+            durationSeconds={duration}
+            existingIdeas={[title, topic].map((s) => s.trim()).filter((s) => s.length > 0)}
+            disabled={submitting}
+            onUseIdea={useSuggestedIdea}
+          />
+
           <Field label="Tiêu đề">
             <input type="text" value={title} onChange={(e) => setTitle(e.target.value)} />
           </Field>
@@ -206,6 +233,7 @@ function NewProjectWizard({ catalog }: { catalog: PresetCatalog }) {
             >
               {submitting ? "Đang tạo..." : "Viết kịch bản"}
             </button>
+            <CostNote kind="longText">Viết kịch bản bằng AI</CostNote>
             <button type="button" className="wz-btn" disabled={submitting} onClick={() => setStep("Template")}>
               Quay lại
             </button>
@@ -231,6 +259,20 @@ function ExistingProjectWizard({ contentProjectId, catalog }: { contentProjectId
   const sawBusyRef = useRef(false);
 
   const [waitingForJob, setWaitingForJob] = useState(false);
+  // True once we've waited past the normal pickup window with no sign of the
+  // job yet - the run may just be queued behind other work. We keep waiting
+  // (never silently revert to an idle-looking screen), just say so plainly
+  // instead of leaving "Đang bắt đầu..." up forever unchanged.
+  const [jobPickupDelayed, setJobPickupDelayed] = useState(false);
+
+  // Guards against losing in-progress edits: a step component reports its own
+  // dirty state here, and both leaving the step (via the step nav or a step's
+  // own "continue" button - both go through handleGoTo) and closing the tab
+  // check it first.
+  const dirtyRef = useRef(false);
+  const handleDirtyChange = useCallback((dirty: boolean) => {
+    dirtyRef.current = dirty;
+  }, []);
 
   const load = useCallback(async () => {
     const data = await wizardApi.getOverview(contentProjectId);
@@ -238,16 +280,20 @@ function ExistingProjectWizard({ contentProjectId, catalog }: { contentProjectId
 
     if (data.progress.busy) {
       sawBusyRef.current = true;
+      setJobPickupDelayed(false);
     } else if (sawBusyRef.current) {
       // The job we were waiting on has finished.
       sawBusyRef.current = false;
       jobStartedAtRef.current = null;
       setWaitingForJob(false);
+      setJobPickupDelayed(false);
       pinnedRef.current = false;
     } else if (jobStartedAtRef.current !== null && Date.now() - jobStartedAtRef.current > JOB_PICKUP_GRACE_MS) {
-      // Never saw it start - give up waiting rather than polling forever.
-      jobStartedAtRef.current = null;
-      setWaitingForJob(false);
+      // Still nothing after the normal pickup window - keep waiting/polling
+      // instead of silently going quiet (the job may just be queued behind
+      // other work), and say so explicitly so the user isn't left guessing
+      // and tempted to resubmit a possibly billable action.
+      setJobPickupDelayed(true);
     }
 
     if (!pinnedRef.current) {
@@ -260,7 +306,7 @@ function ExistingProjectWizard({ contentProjectId, catalog }: { contentProjectId
   useEffect(() => {
     setLoading(true);
     load()
-      .catch((err) => setError(err instanceof Error ? err.message : "Không tải được video này."))
+      .catch((err) => setError(describeApiError(err, "Không tải được video này.")))
       .finally(() => setLoading(false));
   }, [load]);
 
@@ -270,7 +316,7 @@ function ExistingProjectWizard({ contentProjectId, catalog }: { contentProjectId
     if (!busy) return;
 
     const timer = window.setInterval(() => {
-      load().catch((err) => setError(err instanceof Error ? err.message : "Mất kết nối với máy chủ."));
+      load().catch((err) => setError(describeApiError(err, "Mất kết nối với máy chủ.")));
     }, POLL_INTERVAL_MS);
 
     return () => window.clearInterval(timer);
@@ -280,30 +326,62 @@ function ExistingProjectWizard({ contentProjectId, catalog }: { contentProjectId
     jobStartedAtRef.current = Date.now();
     sawBusyRef.current = false;
     setWaitingForJob(true);
+    setJobPickupDelayed(false);
     // Following the server's step again is the point of starting a job.
     pinnedRef.current = false;
   }, []);
 
   const handleRefresh = useCallback(() => {
-    load().catch((err) => setError(err instanceof Error ? err.message : "Không làm mới được."));
+    load().catch((err) => setError(describeApiError(err, "Không làm mới được.")));
   }, [load]);
 
   const handleGoTo = useCallback((next: WizardStepName) => {
+    if (
+      dirtyRef.current &&
+      !window.confirm("Bạn có thay đổi chưa lưu ở bước này. Rời khỏi bước này sẽ mất các thay đổi đó. Tiếp tục?")
+    ) {
+      return;
+    }
+    dirtyRef.current = false;
     pinnedRef.current = true;
     setStep(next);
   }, []);
 
+  // Closing/refreshing the tab loses unsaved edits the same way leaving the
+  // step does - warn there too.
+  useEffect(() => {
+    const handler = (e: BeforeUnloadEvent) => {
+      if (dirtyRef.current) {
+        e.preventDefault();
+        e.returnValue = "";
+      }
+    };
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, []);
+
+  // A step can also change because the server moved us on (not just via
+  // handleGoTo, which already clears it) - either way the newly-mounted step
+  // starts clean, so the guard should too.
+  useEffect(() => {
+    dirtyRef.current = false;
+  }, [step]);
+
   if (loading || !overview || !step) {
     return (
       <main className="wz">
-        <p>{error ? <span className="wz-error">{error}</span> : "Đang tải..."}</p>
+        {error ? <ErrorMessage message={error} /> : <Loading />}
       </main>
     );
   }
 
   // The nav lets the user revisit anything the project's data supports, plus
-  // whichever step they are currently looking at.
-  const reachable = Array.from(new Set([...overview.reachableSteps, step]));
+  // whichever step they are currently looking at. Preview and Export stay open
+  // regardless: each panel already handles the "nothing built yet" case on its
+  // own, so gating navigation to them only gets in the way.
+  const reachable = Array.from(
+    new Set<WizardStepName>([...overview.reachableSteps, step, "Preview", "Export"]),
+  );
   const StepComponent = STEP_COMPONENTS[step];
 
   return (
@@ -319,14 +397,20 @@ function ExistingProjectWizard({ contentProjectId, catalog }: { contentProjectId
       <ProgressPanel progress={overview.progress} estimatedTotalSeconds={overview.estimate.totalSeconds} />
       {waitingForJob && !overview.progress.busy && (
         <div className="wz-progress" role="status">
-          <strong>Đang bắt đầu...</strong>
+          <strong>{jobPickupDelayed ? "Vẫn đang chờ máy chủ xử lý..." : "Đang bắt đầu..."}</strong>
+          {jobPickupDelayed && (
+            <p className="wz-hint" style={{ marginTop: 8 }}>
+              Việc này đang mất nhiều thời gian hơn bình thường để bắt đầu - có thể máy chủ đang xử lý việc khác.
+              Không cần bấm lại nút vừa rồi; hãy đợi thêm hoặc tải lại trang.
+            </p>
+          )}
         </div>
       )}
 
       {overview.failed && !busy && (
-        <p className="wz-error">Lần chạy trước bị lỗi. Hãy thử lại bước đang dở - phần đã xong vẫn được giữ.</p>
+        <ErrorMessage message="Lần chạy trước bị lỗi. Hãy thử lại bước đang dở - phần đã xong vẫn được giữ." />
       )}
-      {error && <p className="wz-error">{error}</p>}
+      <ErrorMessage message={error} />
 
       <StepComponent
         overview={overview}
@@ -336,6 +420,7 @@ function ExistingProjectWizard({ contentProjectId, catalog }: { contentProjectId
         onJobStarted={handleJobStarted}
         onGoTo={handleGoTo}
         onError={setError}
+        onDirtyChange={handleDirtyChange}
       />
 
       <footer className="wz-footer">

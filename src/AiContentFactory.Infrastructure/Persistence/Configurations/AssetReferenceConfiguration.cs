@@ -17,10 +17,12 @@ public class AssetReferenceConfiguration : IEntityTypeConfiguration<AssetReferen
         builder.Property(r => r.ImagePath).HasMaxLength(1000);
         builder.Property(r => r.Provider).HasMaxLength(100);
         builder.Property(r => r.Prompt).HasColumnType("text");
+        builder.Property(r => r.Label).HasMaxLength(200);
 
         builder.Property(r => r.CreatedAt).IsRequired();
         builder.Property(r => r.UpdatedAt).IsRequired();
 
         builder.HasIndex(r => new { r.ContentProjectId, r.Type });
+        builder.HasIndex(r => new { r.ContentProjectId, r.Type, r.Label });
     }
 }

@@ -3,6 +3,7 @@ using AiContentFactory.Application.ContentProjects;
 using AiContentFactory.Application.Costs;
 using AiContentFactory.Application.Generation;
 using AiContentFactory.Application.Scripts;
+using AiContentFactory.Application.Stories;
 using AiContentFactory.Domain.ContentProjects;
 using AiContentFactory.Domain.Generation;
 using AiContentFactory.Domain.Storyboards;
@@ -49,6 +50,7 @@ public class ClipPlanService : IClipPlanService
     private readonly IStoryboardRepository _storyboardRepository;
     private readonly IContentProjectRepository _projectRepository;
     private readonly IVideoAllocationPlanner _allocationPlanner;
+    private readonly IStoryVisualContextResolver _storyVisualContextResolver;
     private readonly CreditCostOptions _creditCosts;
 
     public ClipPlanService(
@@ -56,12 +58,14 @@ public class ClipPlanService : IClipPlanService
         IStoryboardRepository storyboardRepository,
         IContentProjectRepository projectRepository,
         IVideoAllocationPlanner allocationPlanner,
+        IStoryVisualContextResolver storyVisualContextResolver,
         IOptions<CreditCostOptions> creditCosts)
     {
         _scriptService = scriptService;
         _storyboardRepository = storyboardRepository;
         _projectRepository = projectRepository;
         _allocationPlanner = allocationPlanner;
+        _storyVisualContextResolver = storyVisualContextResolver;
         _creditCosts = creditCosts.Value;
     }
 
@@ -101,6 +105,12 @@ public class ClipPlanService : IClipPlanService
                 ?? throw new InvalidOperationException("Storyboard not found after clearing its scenes.");
         }
 
+        // Deterministic, no-AI name matching against the Story's cast/location
+        // names - null for every non-Story project (the normal/default case),
+        // which skips tagging entirely and leaves every scene exactly as it
+        // was before this feature existed.
+        var storyReferenceNames = await _storyVisualContextResolver.GetStoryCastAndLocationNamesAsync(contentProjectId, cancellationToken);
+
         for (var i = 0; i < chunks.Count; i++)
         {
             var slot = allocation[i];
@@ -115,6 +125,15 @@ public class ClipPlanService : IClipPlanService
                 aiVideoPriority: PriorityFor(i, chunks.Count),
                 modelTier: slot.ModelTier?.ToString(),
                 rationale: slot.Rationale);
+
+            if (storyReferenceNames is { Count: > 0 })
+            {
+                var matchedNames = MatchReferenceNames(scene.Narration, scene.VisualDescription, storyReferenceNames);
+                if (matchedNames.Count > 0)
+                {
+                    scene.SetRelevantReferenceLabels(matchedNames);
+                }
+            }
         }
 
         await _storyboardRepository.SaveChangesAsync(cancellationToken);
@@ -168,6 +187,42 @@ public class ClipPlanService : IClipPlanService
         CreditStrategy.Economy => ClipPlanStrategy.AllImages,
         _ => ClipPlanStrategy.CostOptimized
     };
+
+    /// <summary>
+    /// Deterministic, no-AI name matching: scans a scene's narration +
+    /// visual description for a case-insensitive whole-word/whole-phrase
+    /// match of each candidate Story character/location name. Word-boundary
+    /// aware so a short name (e.g. a location literally named "An", as in
+    /// "Hoi An") can't false-match inside an unrelated word like "Ancient".
+    /// Multi-word names (e.g. "Ha Long Bay") are matched as the exact phrase
+    /// with boundaries at both ends, not word-by-word.
+    /// </summary>
+    private static List<string> MatchReferenceNames(string narration, string visualDescription, IReadOnlyList<string> candidateNames)
+    {
+        var text = string.Join(" ", new[] { narration, visualDescription }.Where(s => !string.IsNullOrWhiteSpace(s)));
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return new List<string>();
+        }
+
+        var matches = new List<string>();
+        foreach (var name in candidateNames)
+        {
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                continue;
+            }
+
+            var trimmed = name.Trim();
+            var pattern = $@"\b{Regex.Escape(trimmed)}\b";
+            if (Regex.IsMatch(text, pattern, RegexOptions.IgnoreCase))
+            {
+                matches.Add(trimmed);
+            }
+        }
+
+        return matches;
+    }
 
     private static List<string> SplitIntoChunks(string text, int clipCount)
     {

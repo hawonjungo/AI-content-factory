@@ -2,11 +2,12 @@ import { useEffect, useState } from "react";
 import {
   apiUrl,
   assetReferencesApi,
+  describeApiError,
   type AssetReferenceSlot,
   type AssetReferenceType,
   type Pricing,
 } from "../api/client";
-import { formatUsd } from "./components";
+import { StatusBadge, formatUsd } from "./components";
 
 const TITLE: Record<AssetReferenceType, string> = {
   Character: "Nhân vật chính",
@@ -67,7 +68,7 @@ export function ReferenceCard({
         setPromptLoaded(true);
       })
       .catch((err) => {
-        if (!cancelled) setError(err instanceof Error ? err.message : "Không tải được prompt mẫu.");
+        if (!cancelled) setError(describeApiError(err, "Không tải được prompt mẫu."));
       })
       .finally(() => {
         if (!cancelled) setWorking(null);
@@ -85,7 +86,7 @@ export function ReferenceCard({
       if (kind === "generate") onJobStarted();
       onChanged();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Thao tác không thành công.");
+      setError(describeApiError(err, "Thao tác không thành công."));
     } finally {
       setWorking(null);
     }
@@ -109,7 +110,7 @@ export function ReferenceCard({
     assetReferencesApi
       .getSuggestedPrompt(contentProjectId, "Character")
       .then((res) => setPrompt(res.prompt))
-      .catch((err) => setError(err instanceof Error ? err.message : "Không tải được prompt mẫu."))
+      .catch((err) => setError(describeApiError(err, "Không tải được prompt mẫu.")))
       .finally(() => setWorking(null));
   };
 
@@ -117,8 +118,8 @@ export function ReferenceCard({
     <section className="wz-card" style={{ flex: "1 1 320px" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
         <h3 style={{ margin: 0 }}>{TITLE[type]}</h3>
-        {slot.status === "Approved" && <span className="wz-badge wz-badge-ready">Đã chốt</span>}
-        {slot.status === "Skipped" && <span className="wz-badge">Đã bỏ qua</span>}
+        {slot.status === "Approved" && <StatusBadge tone="success">Đã chốt</StatusBadge>}
+        {slot.status === "Skipped" && <StatusBadge tone="neutral">Đã bỏ qua</StatusBadge>}
       </div>
       <p className="wz-hint" style={{ marginBottom: 12 }}>
         {HINT[type]}
